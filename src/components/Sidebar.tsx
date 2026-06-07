@@ -5,9 +5,10 @@ import {
   Monitor,
   ShieldCheck,
   ShieldAlert,
-  Settings,
+  Gauge,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { categoryIcon } from "../lib/categoryIcons";
 import { useAppStore } from "../store/useAppStore";
 import type { TweakCategory } from "../types";
 
@@ -51,7 +52,9 @@ export function Sidebar({
     <aside className="sidebar">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="sidebar-header">
-        <Settings size={14} strokeWidth={2} style={{ color: "var(--accent)", flexShrink: 0 }} />
+        <span className="sidebar-logo">
+          <Gauge size={16} strokeWidth={2.2} />
+        </span>
         <span className="sidebar-title">VOptimizer</span>
       </div>
 
@@ -111,7 +114,7 @@ export function Sidebar({
               className={cn("sidebar-item", isActive && "sidebar-item--active")}
               onClick={() => onSelectPage(cat.id)}
             >
-              <span className="sidebar-item-icon">{cat.icon}</span>
+              <span className="sidebar-item-icon">{categoryIcon(cat.id, 16)}</span>
               <span className="sidebar-item-name">{cat.name}</span>
               <span className="sidebar-item-badge">
                 {applied > 0 && (

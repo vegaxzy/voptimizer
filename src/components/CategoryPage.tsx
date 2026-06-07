@@ -5,6 +5,7 @@ import { CompactTweakRow } from "./CompactTweakRow";
 import { BottomLogDrawer } from "./BottomLogDrawer";
 import { AdminBanner } from "./AdminBanner";
 import { RiskModal } from "./RiskModal";
+import { categoryIcon } from "../lib/categoryIcons";
 import { cn } from "../lib/cn";
 
 type FilterMode = "all" | "implemented" | "applied" | "safe" | "high-risk" | "experimental";
@@ -88,12 +89,14 @@ export function CategoryPage({
 
           {/* ── Header ──────────────────────────────────────── */}
           <header className="content-header">
-            <span className="content-header-icon">{category.icon}</span>
-            <h1 className="content-header-title">{category.name}</h1>
-            <span className="content-header-count">
-              {implementedCount}/{categoryTweaks.length} ready
-              {appliedCount > 0 && ` · ${appliedCount} applied`}
-            </span>
+            <span className="content-header-icon">{categoryIcon(category.id)}</span>
+            <div className="content-header-text">
+              <h1 className="content-header-title">{category.name}</h1>
+              <span className="content-header-count">
+                {implementedCount} ready
+                {appliedCount > 0 && ` · ${appliedCount} applied`}
+              </span>
+            </div>
           </header>
 
           {/* ── Filter bar ──────────────────────────────────── */}
@@ -117,21 +120,19 @@ export function CategoryPage({
           {visibleTweaks.length === 0 ? (
             <p className="cat-empty">No tweaks match this filter.</p>
           ) : (
-            <div className="settings-panel">
-              <div className="tweak-list">
-                {visibleTweaks.map((tweak) => (
-                  <CompactTweakRow
-                    key={tweak.id}
-                    state={tweakStates[tweak.id]}
-                    hasNvidia={hasNvidia}
-                    hasAmd={hasAmd}
-                    isAdmin={isAdmin}
-                    onRequestApply={onRequestApply}
-                    onRevert={onRevert}
-                    onRestartAsAdmin={onRestartAsAdmin}
-                  />
-                ))}
-              </div>
+            <div className="tweak-list">
+              {visibleTweaks.map((tweak) => (
+                <CompactTweakRow
+                  key={tweak.id}
+                  state={tweakStates[tweak.id]}
+                  hasNvidia={hasNvidia}
+                  hasAmd={hasAmd}
+                  isAdmin={isAdmin}
+                  onRequestApply={onRequestApply}
+                  onRevert={onRevert}
+                  onRestartAsAdmin={onRestartAsAdmin}
+                />
+              ))}
             </div>
           )}
         </div>

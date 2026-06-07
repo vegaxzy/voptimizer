@@ -1,3 +1,4 @@
+import { ShieldAlert, Check, AlertTriangle, RotateCw, Lock } from "lucide-react";
 import type { TweakState } from "../types";
 
 interface TweakCardProps {
@@ -57,7 +58,7 @@ export function TweakCard({
           <span className="exp-badge exp-badge--exp-tag">Experimental</span>
         )}
         {tweak.requiresAdmin && (
-          <span className="exp-badge exp-badge--admin">🛡 Admin</span>
+          <span className="exp-badge exp-badge--admin"><ShieldAlert size={10} strokeWidth={2} /> Admin</span>
         )}
         {tweak.nvidiaOnly && (
           <span className="exp-badge exp-badge--nvidia">NVIDIA</span>
@@ -68,8 +69,8 @@ export function TweakCard({
         {!tweak.isImplemented && (
           <span className="exp-badge exp-badge--placeholder">Coming Soon</span>
         )}
-        {isApplied && <span className="applied-indicator">✓ Applied</span>}
-        {status === "error" && <span className="error-indicator">⚠ Error</span>}
+        {isApplied && <span className="applied-indicator"><Check size={11} strokeWidth={2.5} /> Applied</span>}
+        {status === "error" && <span className="error-indicator"><AlertTriangle size={11} strokeWidth={2} /> Error</span>}
       </div>
 
       <h3 className="tweak-card-name">{tweak.name}</h3>
@@ -99,7 +100,7 @@ export function TweakCard({
             </span>
           ))}
           {tweak.requiresRestart && (
-            <span className="exp-badge exp-badge--restart">↻ Restart</span>
+            <span className="exp-badge exp-badge--restart"><RotateCw size={10} strokeWidth={2} /> Restart</span>
           )}
         </div>
       )}
@@ -107,7 +108,7 @@ export function TweakCard({
       <div className="tweak-card-actions">
         {isAdminLocked ? (
           <div className="admin-lock-notice">
-            <span className="admin-lock-icon">🔒</span>
+            <span className="admin-lock-icon"><Lock size={12} strokeWidth={2} /></span>
             <span className="admin-lock-text">Requires administrator</span>
             <button className="btn btn--restart-admin" onClick={onRestartAsAdmin}>
               Restart as Admin

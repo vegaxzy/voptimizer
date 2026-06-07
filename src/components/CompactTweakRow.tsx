@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, RotateCcw, Lock, ChevronDown } from "lucide-react";
+import { Play, RotateCcw, Lock, ChevronDown, Check, ShieldAlert } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { TweakState } from "../types";
 
@@ -75,16 +75,21 @@ export function CompactTweakRow({
           <span className="ctr-desc">{tweak.description}</span>
         </div>
 
-        {/* Trailing: applied pill + expand arrow */}
+        {/* Trailing: status badge + expand arrow */}
         <div className="ctr-trailing">
-          {isApplied && (
-            <span className="applied-pill">
-              <span style={{ fontSize: 10 }}>✓</span> Applied
+          {isAdminLocked ? (
+            <span className="status-badge status-badge--admin">
+              <ShieldAlert size={11} strokeWidth={2} /> Admin
             </span>
-          )}
-          {status === "error" && (
-            <span style={{ fontSize: 11, color: "var(--danger)", fontWeight: 600 }}>Error</span>
-          )}
+          ) : isApplied ? (
+            <span className="status-badge status-badge--applied">
+              <Check size={11} strokeWidth={2.5} /> Applied
+            </span>
+          ) : status === "error" ? (
+            <span className="status-badge status-badge--error">Error</span>
+          ) : tweak.isImplemented && !isUnavailable ? (
+            <span className="status-badge status-badge--ready">Ready</span>
+          ) : null}
           {hasDetail && (
             <ChevronDown
               size={14}

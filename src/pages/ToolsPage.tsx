@@ -15,6 +15,7 @@ import {
   Square,
   Camera,
   RotateCcw,
+  Pickaxe,
 } from "lucide-react";
 import { AdminBanner } from "../components/AdminBanner";
 import {
@@ -106,18 +107,11 @@ function OverlayDetectorCard() {
   const detected = overlays.filter((o) => o.detected);
   const notDetected = overlays.filter((o) => !o.detected);
 
-  const categoryColor: Record<string, string> = {
-    communication: "var(--info)",
-    gaming: "var(--accent)",
-    recording: "var(--warning)",
-    performance: "var(--success)",
-  };
-
   return (
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <Activity size={16} className="tools-card-icon" style={{ color: "var(--info)" }} />
+          <Activity size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Overlay Detector</div>
             <div className="tools-card-desc">
@@ -148,7 +142,7 @@ function OverlayDetectorCard() {
               Active ({detected.length})
             </p>
             {detected.map((o) => (
-              <OverlayRow key={o.id} overlay={o} categoryColor={categoryColor} />
+              <OverlayRow key={o.id} overlay={o} />
             ))}
           </div>
         )}
@@ -159,7 +153,7 @@ function OverlayDetectorCard() {
               Not running ({notDetected.length})
             </p>
             {notDetected.map((o) => (
-              <OverlayRow key={o.id} overlay={o} categoryColor={categoryColor} />
+              <OverlayRow key={o.id} overlay={o} />
             ))}
           </div>
         )}
@@ -168,13 +162,7 @@ function OverlayDetectorCard() {
   );
 }
 
-function OverlayRow({
-  overlay,
-  categoryColor,
-}: {
-  overlay: OverlayInfo;
-  categoryColor: Record<string, string>;
-}) {
+function OverlayRow({ overlay }: { overlay: OverlayInfo }) {
   const [showTip, setShowTip] = useState(false);
   return (
     <div
@@ -185,9 +173,7 @@ function OverlayRow({
       <span
         className="tools-overlay-dot"
         style={{
-          background: overlay.detected
-            ? (categoryColor[overlay.category] ?? "var(--success)")
-            : "var(--subtle)",
+          background: overlay.detected ? "var(--text)" : "var(--subtle)",
           opacity: overlay.detected ? 1 : 0.4,
         }}
       />
@@ -200,7 +186,7 @@ function OverlayRow({
       </div>
       <span
         className="tools-overlay-cat"
-        style={{ color: categoryColor[overlay.category] ?? "var(--muted)", opacity: overlay.detected ? 1 : 0.5 }}
+        style={{ opacity: overlay.detected ? 1 : 0.5 }}
       >
         {overlay.category}
       </span>
@@ -246,7 +232,7 @@ function BackgroundLoadCard() {
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <Cpu size={16} className="tools-card-icon" style={{ color: "var(--warning)" }} />
+          <Cpu size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Background Load Scanner</div>
             <div className="tools-card-desc">
@@ -290,7 +276,7 @@ function BackgroundLoadCard() {
                   {p.is_gaming_impact && (
                     <AlertTriangle
                       size={11}
-                      style={{ color: "var(--warning)", flexShrink: 0 }}
+                      style={{ color: "var(--subtle)", flexShrink: 0 }}
                     />
                   )}
                   {p.name}
@@ -383,17 +369,11 @@ function ShaderCacheCard() {
     .filter((c) => selected.has(c.id))
     .reduce((sum, c) => sum + c.size_mb, 0);
 
-  const vendorColor: Record<string, string> = {
-    directx: "var(--info)",
-    nvidia: "var(--success)",
-    amd: "var(--warning)",
-  };
-
   return (
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <Layers size={16} className="tools-card-icon" style={{ color: "var(--accent)" }} />
+          <Layers size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Shader Cache Cleaner</div>
             <div className="tools-card-desc">
@@ -431,10 +411,7 @@ function ShaderCacheCard() {
               />
               <div className="tools-cache-info">
                 <span className="tools-cache-name">{cache.name}</span>
-                <span
-                  className="tools-cache-vendor"
-                  style={{ color: vendorColor[cache.vendor] ?? "var(--muted)" }}
-                >
+                <span className="tools-cache-vendor">
                   {cache.vendor}
                 </span>
               </div>
@@ -533,7 +510,7 @@ function GameSessionCard({ isAdmin }: { isAdmin: boolean }) {
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <Gamepad2 size={16} className="tools-card-icon" style={{ color: "var(--success)" }} />
+          <Gamepad2 size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Game Session Mode</div>
             <div className="tools-card-desc">
@@ -588,15 +565,15 @@ function GameSessionCard({ isAdmin }: { isAdmin: boolean }) {
         {!status?.active && (
           <div className="tools-session-preview">
             <div className="tools-session-preview-item">
-              <Circle size={8} style={{ color: "var(--accent)" }} />
+              <Circle size={7} style={{ color: "var(--subtle)" }} />
               Switch to High Performance power plan
             </div>
             <div className="tools-session-preview-item">
-              <Circle size={8} style={{ color: "var(--accent)" }} />
+              <Circle size={7} style={{ color: "var(--subtle)" }} />
               Flush RAM standby list
             </div>
             <div className="tools-session-preview-item">
-              <Circle size={8} style={{ color: "var(--accent)" }} />
+              <Circle size={7} style={{ color: "var(--subtle)" }} />
               Flush DNS cache
             </div>
             <div className="tools-session-preview-item" style={{ color: "var(--subtle)", fontStyle: "italic" }}>
@@ -652,16 +629,11 @@ function MinecraftMonitorCard() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  const ramPct =
-    data?.found && data.ram_mb > 0
-      ? Math.min(100, Math.round((data.ram_mb / 8192) * 100))
-      : 0;
-
   return (
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <span style={{ fontSize: 16, lineHeight: 1 }}>⛏️</span>
+          <Pickaxe size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Minecraft Monitor</div>
             <div className="tools-card-desc">
@@ -685,8 +657,8 @@ function MinecraftMonitorCard() {
         ) : (
           <>
             <div className="tools-mc-status">
-              <CheckCircle2 size={14} style={{ color: "var(--success)" }} />
-              <span style={{ color: "var(--success)", fontWeight: 600 }}>
+              <Circle size={8} style={{ color: "var(--success)", fill: "var(--success)" }} />
+              <span style={{ color: "var(--text)", fontWeight: 600 }}>
                 Running
               </span>
               {data.instance_count > 1 && (
@@ -703,17 +675,7 @@ function MinecraftMonitorCard() {
               </div>
               <div className="tools-mc-stat">
                 <span className="tools-mc-stat-label">RAM</span>
-                <span
-                  className="tools-mc-stat-value"
-                  style={{
-                    color:
-                      data.ram_mb > 6144
-                        ? "var(--danger)"
-                        : data.ram_mb > 3072
-                        ? "var(--warning)"
-                        : "var(--success)",
-                  }}
-                >
+                <span className="tools-mc-stat-value">
                   {fmtMB(data.ram_mb)}
                 </span>
               </div>
@@ -722,23 +684,6 @@ function MinecraftMonitorCard() {
                 <span className="tools-mc-stat-value">{data.cpu_s.toFixed(1)} s</span>
               </div>
             </div>
-
-            {data.ram_mb > 0 && (
-              <div className="tools-mc-bar-wrap">
-                <div
-                  className="tools-mc-bar-fill"
-                  style={{
-                    width: `${ramPct}%`,
-                    background:
-                      ramPct > 75
-                        ? "var(--danger)"
-                        : ramPct > 50
-                        ? "var(--warning)"
-                        : "var(--success)",
-                  }}
-                />
-              </div>
-            )}
           </>
         )}
       </div>
@@ -816,7 +761,7 @@ function BenchmarkSessionCard() {
     <div className="tools-card">
       <div className="tools-card-header">
         <div className="tools-card-title-row">
-          <BarChart2 size={16} className="tools-card-icon" style={{ color: "var(--warning)" }} />
+          <BarChart2 size={15} className="tools-card-icon" />
           <div>
             <div className="tools-card-title">Benchmark Session</div>
             <div className="tools-card-desc">
@@ -843,14 +788,12 @@ function BenchmarkSessionCard() {
             snap={state.before}
             busy={busyBefore}
             onTake={snapBefore}
-            accent="var(--info)"
           />
           <SnapshotPanel
             label="After"
             snap={state.after}
             busy={busyAfter}
             onTake={snapAfter}
-            accent="var(--success)"
             disabled={!state.before}
           />
         </div>
@@ -896,20 +839,18 @@ function SnapshotPanel({
   snap,
   busy,
   onTake,
-  accent,
   disabled = false,
 }: {
   label: string;
   snap: SystemSnapshot | null;
   busy: boolean;
   onTake: () => void;
-  accent: string;
   disabled?: boolean;
 }) {
   return (
     <div className="tools-bench-panel">
-      <div className="tools-bench-panel-header" style={{ borderColor: accent }}>
-        <span className="tools-bench-panel-label" style={{ color: accent }}>
+      <div className="tools-bench-panel-header">
+        <span className="tools-bench-panel-label">
           {label}
         </span>
         <button
@@ -1001,8 +942,8 @@ export function ToolsPage({ isAdmin, onRestartAsAdmin }: ToolsPageProps) {
       <div className="page-scroll">
         <div className="content-container">
           <div className="content-header">
-            <span className="content-header-icon">🔧</span>
-            <div>
+            <span className="content-header-icon"><Gamepad2 size={18} strokeWidth={1.8} /></span>
+            <div className="content-header-text">
               <h1 className="content-header-title">Gaming Tools</h1>
               <p className="content-header-count">
                 6 optimization utilities

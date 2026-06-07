@@ -12,6 +12,7 @@ import {
   Layers,
   Wifi,
   ShieldCheck,
+  Monitor,
 } from "lucide-react";
 
 // ── Types matching the Rust SystemOverview struct (flat, snake_case) ────────
@@ -271,7 +272,7 @@ function LoadingSkeleton() {
         <div className="content-container">
           <div className="sov-header">
             <div className="sov-header-left">
-              <div className="sov-header-icon">🖥️</div>
+              <div className="sov-header-icon"><Monitor size={20} strokeWidth={1.8} /></div>
               <div>
                 <h1 className="content-header-title">System Overview</h1>
                 <p className="content-header-count">Reading hardware data…</p>
@@ -351,7 +352,7 @@ export function SystemOverviewPage() {
           <div className="content-container">
             <div className="sov-header">
               <div className="sov-header-left">
-                <div className="sov-header-icon">🖥️</div>
+                <div className="sov-header-icon"><Monitor size={20} strokeWidth={1.8} /></div>
                 <div>
                   <h1 className="content-header-title">System Overview</h1>
                   <p className="content-header-count">Failed to read system data</p>
@@ -400,7 +401,7 @@ export function SystemOverviewPage() {
           {/* ── Header ──────────────────────────────────────────────────── */}
           <div className="sov-header">
             <div className="sov-header-left">
-              <div className="sov-header-icon">🖥️</div>
+              <div className="sov-header-icon"><Monitor size={20} strokeWidth={1.8} /></div>
               <div>
                 <h1 className="content-header-title">System Overview</h1>
                 <p className="content-header-count">
