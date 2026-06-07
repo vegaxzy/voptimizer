@@ -31,6 +31,10 @@ import { useStartupApps } from "../hooks/useStartupApps";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
+function fmtClock(ms: number) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 const helper = createColumnHelper<StartupApp>();
 
 const SOURCE_CLASSES: Record<string, string> = {
@@ -103,7 +107,7 @@ interface StartupAppsPageProps {
 }
 
 export function StartupAppsPage({ isAdmin, onRestartAsAdmin }: StartupAppsPageProps) {
-  const { apps, logs, isLoading, busyIds, refresh, disable, enable, clearLogs } =
+  const { apps, logs, isLoading, isRefreshing, lastUpdated, error, busyIds, refresh, disable, enable, clearLogs } =
     useStartupApps();
 
   const [search, setSearch] = useState("");
@@ -254,14 +258,25 @@ export function StartupAppsPage({ isAdmin, onRestartAsAdmin }: StartupAppsPagePr
             <button
               className="btn btn--ghost btn--sm"
               onClick={refresh}
-              disabled={isLoading}
+              disabled={isLoading || isRefreshing}
               title="Refresh list"
             >
-              <RefreshCw size={11} strokeWidth={2} className={isLoading ? "spin" : ""} />
-              {isLoading ? "Loading…" : "Refresh"}
+              <RefreshCw size={11} strokeWidth={2} className={isLoading || isRefreshing ? "spin" : ""} />
+              {isLoading || isRefreshing ? "Refreshing…" : "Refresh"}
             </button>
           </div>
         </header>
+
+        {lastUpdated && (
+          <div className="startup-meta-row">
+            <span className="refresh-indicator">Updated {fmtClock(lastUpdated)}</span>
+            {error && (
+              <span className="startup-inline-error">
+                <TriangleAlert size={11} strokeWidth={2} /> Refresh failed — showing last known data
+              </span>
+            )}
+          </div>
+        )}
 
         {/* ── Summary stat cards ──────────────────────────────────── */}
         <div className="stat-grid">
@@ -297,13 +312,32 @@ export function StartupAppsPage({ isAdmin, onRestartAsAdmin }: StartupAppsPagePr
         {/* ── Table ──────────────────────────────────────────────── */}
         <div className="startup-table-wrap">
           {isLoading && apps.length === 0 ? (
-            <div className="startup-placeholder">Loading startup entries…</div>
+            <div className="startup-table-inner">
+              <div className="startup-skeleton-list">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="startup-skeleton-row">
+                    <div className="skeleton" style={{ width: "32%", height: 13 }} />
+                    <div className="skeleton" style={{ width: "18%", height: 13 }} />
+                    <div className="skeleton" style={{ width: "26%", height: 13 }} />
+                    <div className="skeleton" style={{ width: 64, height: 20, borderRadius: 20 }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : error && apps.length === 0 ? (
+            <div className="startup-placeholder">
+              <TriangleAlert size={20} strokeWidth={1.8} style={{ color: "var(--subtle)", marginBottom: 10 }} />
+              <p style={{ marginBottom: 12 }}>Couldn&apos;t read startup entries.</p>
+              <button className="btn btn--ghost btn--sm" onClick={refresh}>
+                <RefreshCw size={11} strokeWidth={2} /> Try again
+              </button>
+            </div>
           ) : table.getRowModel().rows.length === 0 ? (
             <div className="startup-placeholder">
               {search ? `No results for "${search}"` : "No startup entries found."}
             </div>
           ) : (
-            <div className="startup-table-inner">
+            <div className="startup-table-inner content-fade-in">
               <table className="startup-table">
                 <thead>
                   <tr className="startup-thead-row">

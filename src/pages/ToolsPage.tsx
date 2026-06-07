@@ -16,6 +16,7 @@ import {
   Camera,
   RotateCcw,
   Pickaxe,
+  Check,
 } from "lucide-react";
 import { AdminBanner } from "../components/AdminBanner";
 import { useCachedResource } from "../hooks/useCachedResource";
@@ -114,13 +115,21 @@ function OverlayDetectorCard() {
 
       <div className="tools-card-body">
         {!scanned && isLoading && (
-          <p className="tools-empty">Scanning overlays…</p>
+          <div className="tools-skeleton-list">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="tools-skeleton-row">
+                <div className="skeleton" style={{ width: 8, height: 8, borderRadius: 50 }} />
+                <div className="skeleton" style={{ width: `${40 + i * 10}%`, height: 12 }} />
+              </div>
+            ))}
+          </div>
         )}
 
         {error && scanned && (
-          <p className="tools-empty" style={{ color: "var(--warning)" }}>
-            Rescan failed — showing last result.
-          </p>
+          <div className="tools-warning-banner">
+            <AlertTriangle size={13} />
+            <span>Rescan failed — showing last result.</span>
+          </div>
         )}
 
         {scanned && detected.length === 0 && (
@@ -381,14 +390,12 @@ function ShaderCacheCard() {
               onClick={() => cache.exists && toggleSelect(cache.id)}
               style={{ cursor: cache.exists ? "pointer" : "default" }}
             >
-              <input
-                type="checkbox"
-                className="tools-cache-check"
-                checked={isSel}
-                readOnly
-                disabled={!cache.exists}
-                tabIndex={-1}
-              />
+              <span
+                className={`vc-check ${isSel ? "vc-check--on" : ""} ${!cache.exists ? "vc-check--disabled" : ""}`}
+                aria-hidden="true"
+              >
+                <Check size={13} strokeWidth={3} />
+              </span>
               <div className="tools-cache-info">
                 <span className="tools-cache-name">{cache.name}</span>
                 <span className="tools-cache-vendor">
@@ -912,7 +919,7 @@ function DeltaCell({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════��═══
 // PAGE ROOT
 // ═══════════════════════════════════════════════════════════════════════════
 

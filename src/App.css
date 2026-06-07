@@ -350,7 +350,7 @@ input, select, textarea { font-family: inherit; }
   border: 1px solid var(--border);
 }
 .status-badge--ready   { background: rgba(255,255,255,0.04); color: var(--muted); }
-.status-badge--applied { background: var(--success-bg); color: var(--success); border-color: rgba(62,207,127,0.22); }
+.status-badge--applied { background: rgba(255,255,255,0.07); color: var(--text); border-color: var(--border-hi); }
 .status-badge--admin   { background: var(--warning-bg); color: var(--warning); border-color: rgba(232,177,58,0.22); }
 .status-badge--error   { background: var(--danger-bg);  color: var(--danger);  border-color: rgba(240,88,78,0.22); }
 
@@ -473,11 +473,17 @@ input, select, textarea { font-family: inherit; }
 .btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.btn--apply       { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-.btn--apply:hover { background: var(--accent-hover); }
+.btn--apply {
+  background: rgba(255,255,255,0.085); color: var(--text);
+  border: 1px solid var(--border-hi); font-weight: 550;
+}
+.btn--apply:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.16); }
 
-.btn--revert       { background: var(--danger-bg); color: var(--danger); }
-.btn--revert:hover { background: rgba(255,69,58,0.18); }
+.btn--revert {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border-hi);
+}
+.btn--revert:hover { background: var(--row-hover); color: var(--text); border-color: rgba(255,255,255,0.16); }
 
 .btn--ghost       { background: rgba(255,255,255,0.07); color: var(--muted); }
 .btn--ghost:hover { background: rgba(255,255,255,0.11); color: var(--text); }
@@ -485,11 +491,17 @@ input, select, textarea { font-family: inherit; }
 .btn--danger       { background: var(--danger-bg); color: var(--danger); }
 .btn--danger:hover { background: rgba(255,69,58,0.18); }
 
-.btn--enable       { background: var(--success-bg); color: var(--success); }
-.btn--enable:hover { background: rgba(52,199,89,0.18); }
+.btn--enable {
+  background: rgba(255,255,255,0.085); color: var(--text);
+  border: 1px solid var(--border-hi);
+}
+.btn--enable:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.16); }
 
-.btn--disable       { background: rgba(255,255,255,0.07); color: var(--muted); }
-.btn--disable:hover { background: rgba(255,255,255,0.11); color: var(--text); }
+.btn--disable {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border-hi);
+}
+.btn--disable:hover { background: var(--row-hover); color: var(--text); border-color: rgba(255,255,255,0.16); }
 
 .btn--secondary       { background: rgba(255,255,255,0.07); color: var(--muted); }
 .btn--secondary:hover { background: rgba(255,255,255,0.11); color: var(--text); }
@@ -786,7 +798,28 @@ input, select, textarea { font-family: inherit; }
 .source-badge--user   { background: var(--success-bg); color: var(--success); }
 .source-badge--common { background: var(--warning-bg); color: var(--warning); }
 
-.startup-placeholder { padding: 48px 28px; text-align: center; color: var(--subtle); font-size: 13px; }
+.startup-placeholder {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 28px; text-align: center; color: var(--subtle); font-size: 13px;
+}
+
+/* Startup — meta row (last updated + inline error) */
+.startup-meta-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: -2px 0 4px;
+}
+.startup-inline-error {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--warning);
+}
+
+/* Startup — skeleton loading rows */
+.startup-skeleton-list { display: flex; flex-direction: column; }
+.startup-skeleton-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 13px 18px; border-bottom: 1px solid var(--sep-s);
+}
+.startup-skeleton-row:last-child { border-bottom: none; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    BACKUP & RESTORE PAGE
@@ -995,6 +1028,52 @@ input, select, textarea { font-family: inherit; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .spin { animation: spin 0.9s linear infinite; }
 
+/* Skeleton shimmer used by loading states */
+@keyframes pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--card) 0%, var(--card-hi) 50%, var(--card) 100%);
+  background-size: 200% 100%;
+  border-radius: var(--r-xs);
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Soft fade-in for content swapping in after load */
+@keyframes contentFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.content-fade-in { animation: contentFadeIn 0.28s ease; }
+
+/* Subtle "refreshing" pill used across pages */
+.refresh-indicator {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--subtle); font-variant-numeric: tabular-nums;
+}
+.refresh-indicator--active { color: var(--muted); }
+
+/* ── Custom checkbox — shared across Debloat / Gaming Tools ───────────────── */
+.vc-check {
+  position: relative; flex-shrink: 0;
+  width: 19px; height: 19px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border-hi); border-radius: 6px;
+  background: var(--card-hi); color: var(--accent-fg);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.vc-check svg {
+  opacity: 0; transform: scale(0.5);
+  transition: opacity 0.15s ease, transform 0.18s cubic-bezier(0.34,1.56,0.64,1);
+}
+.vc-check--on {
+  background: var(--accent); border-color: var(--accent);
+}
+.vc-check--on svg { opacity: 1; transform: scale(1); }
+.vc-check--disabled { opacity: 0.4; }
+
 .sidebar-item-icon svg, .sidebar-admin-icon svg { display: block; }
 
 /* Risk dot alias for ctr-dot */
@@ -1078,6 +1157,9 @@ input, select, textarea { font-family: inherit; }
 .tools-icon-btn:disabled { opacity: 0.35; cursor: default; }
 
 .tools-empty { font-size: 12px; color: var(--subtle); }
+
+.tools-skeleton-list { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+.tools-skeleton-row { display: flex; align-items: center; gap: 10px; }
 
 .tools-section-label {
   font-size: 10px; font-weight: 600; text-transform: uppercase;
@@ -1173,10 +1255,13 @@ input, select, textarea { font-family: inherit; }
   display: flex; align-items: center; gap: 10px;
   padding: 9px 10px; border-radius: var(--r-sm);
   border: 1px solid transparent;
-  transition: background 0.1s, border-color 0.1s;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
 }
 .tools-cache-row:hover { background: var(--row-hover); }
-.tools-cache-row--selected { border-color: var(--accent); background: var(--accent-dim); }
+.tools-cache-row--selected {
+  border-color: var(--border-hi); background: var(--card-hi);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .tools-cache-row--absent   { opacity: 0.45; }
 
 .tools-cache-check { accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
@@ -1233,7 +1318,7 @@ input, select, textarea { font-family: inherit; }
 .btn--accent       { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
 .btn--accent:hover { background: var(--accent-hover); }
 
-/* ── Minecraft Monitor ───────────────────────────────── */
+/* ── Minecraft Monitor ─────────────���─────────────────── */
 .tools-mc-status {
   display: flex; align-items: center; gap: 7px;
 }
@@ -1351,12 +1436,15 @@ input, select, textarea { font-family: inherit; }
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
 }
 .sov-metric-card {
-  background: var(--card); border-radius: var(--r);
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
   padding: 16px; display: flex; align-items: flex-start; gap: 12px;
+  box-shadow: var(--shadow-sm); transition: border-color 0.12s;
 }
+.sov-metric-card:hover { border-color: var(--border-hi); }
 .sov-metric-icon {
   width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--card-hi); color: var(--muted);
 }
 .sov-metric-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .sov-metric-label   { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--subtle); }
@@ -1375,15 +1463,15 @@ input, select, textarea { font-family: inherit; }
 
 /* Section cards */
 .sov-section-card {
-  background: var(--card); border-radius: var(--r-lg); overflow: hidden;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm);
 }
 .sov-section-header {
   display: flex; align-items: center; gap: 8px;
   padding: 12px 16px; border-bottom: 1px solid var(--sep);
-  background: rgba(255,255,255,0.02);
-  border-left: 3px solid;
+  background: var(--card-hi);
 }
-.sov-section-icon  { display: flex; align-items: center; flex-shrink: 0; }
+.sov-section-icon  { display: flex; align-items: center; flex-shrink: 0; color: var(--muted); }
 .sov-section-title { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
 .sov-section-body  { padding: 6px 0; display: flex; flex-direction: column; }
 
@@ -1447,15 +1535,25 @@ input, select, textarea { font-family: inherit; }
 
 .dbl-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 
+.dbl-skeleton-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 15px 16px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
+}
+.dbl-skeleton-lines { flex: 1; display: flex; flex-direction: column; gap: 7px; }
+
 .dbl-row {
   display: flex; align-items: flex-start; gap: 12px; width: 100%;
   text-align: left; padding: 14px 16px;
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
-  cursor: pointer; transition: border-color 0.12s, background 0.12s;
+  cursor: pointer; transition: border-color 0.14s, background 0.14s, box-shadow 0.14s;
   font-family: inherit;
 }
 .dbl-row:hover:not(:disabled) { border-color: var(--border-hi); background: var(--card-hi); }
-.dbl-row--selected { border-color: var(--accent); background: var(--card-hi); }
+.dbl-row--selected {
+  border-color: var(--border-hi); background: var(--card-hi);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .dbl-row--empty { opacity: 0.45; cursor: default; }
 
 .dbl-check {

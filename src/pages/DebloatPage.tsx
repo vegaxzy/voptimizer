@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Lock,
   Package,
-  CheckCircle2,
+  Check,
   Loader2,
 } from "lucide-react";
 import {
@@ -40,6 +40,24 @@ function fmtFiles(n: number): string {
   if (n === 0) return "no files";
   if (n === 1) return "1 file";
   return `${n.toLocaleString()} files`;
+}
+
+// Skeleton placeholder rows shared by both Debloat views during first scan/load.
+function DblSkeletonList({ rows = 6 }: { rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="dbl-skeleton-row">
+          <div className="skeleton" style={{ width: 19, height: 19, borderRadius: 6 }} />
+          <div className="dbl-skeleton-lines">
+            <div className="skeleton" style={{ width: `${38 + (i % 3) * 12}%`, height: 13 }} />
+            <div className="skeleton" style={{ width: `${60 + (i % 2) * 15}%`, height: 11 }} />
+          </div>
+          <div className="skeleton" style={{ width: 56, height: 16 }} />
+        </div>
+      ))}
+    </>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -176,7 +194,10 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       <div className="dbl-list">
-        {cats.map((c) => {
+        {scanning && cats.length === 0 ? (
+          <DblSkeletonList rows={6} />
+        ) : (
+          cats.map((c) => {
           const isSel = selected.has(c.id);
           const empty = !c.exists || c.size_mb <= 0;
           const adminBlocked = c.requires_admin && !isAdmin;
@@ -187,8 +208,8 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
               onClick={() => !empty && toggle(c.id)}
               disabled={empty || cleaning}
             >
-              <span className={cn("dbl-check", isSel && "dbl-check--on")}>
-                {isSel && <CheckCircle2 size={14} strokeWidth={2.4} />}
+              <span className={cn("vc-check", isSel && "vc-check--on")} aria-hidden="true">
+                <Check size={13} strokeWidth={3} />
               </span>
               <span className="dbl-info">
                 <span className="dbl-name-row">
@@ -212,7 +233,8 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
               </span>
             </button>
           );
-        })}
+        })
+        )}
       </div>
 
       <div className="dbl-actionbar">
@@ -342,8 +364,8 @@ function BloatwareView() {
         onClick={() => toggle(a.id, a.removable)}
         disabled={!a.removable || removing}
       >
-        <span className={cn("dbl-check", isSel && "dbl-check--on")}>
-          {isSel && <CheckCircle2 size={14} strokeWidth={2.4} />}
+        <span className={cn("vc-check", isSel && "vc-check--on", !a.removable && "vc-check--disabled")} aria-hidden="true">
+          <Check size={13} strokeWidth={3} />
         </span>
         <span className="dbl-info">
           <span className="dbl-name-row">
@@ -364,10 +386,14 @@ function BloatwareView() {
 
   if (loading) {
     return (
-      <div className="dbl-toolbar" style={{ justifyContent: "center", padding: 40 }}>
-        <Loader2 size={16} className="spin" />
-        <span className="dbl-toolbar-info">Listing installed apps…</span>
-      </div>
+      <>
+        <div className="dbl-toolbar">
+          <span className="dbl-toolbar-info">Listing installed apps…</span>
+        </div>
+        <div className="dbl-list">
+          <DblSkeletonList rows={7} />
+        </div>
+      </>
     );
   }
 

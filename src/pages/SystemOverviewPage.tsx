@@ -103,7 +103,6 @@ function MetricCard({
   secondary,
   barValue,
   barMax,
-  accentColor,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -111,14 +110,10 @@ function MetricCard({
   secondary?: string;
   barValue?: number;
   barMax?: number;
-  accentColor: string;
 }) {
   return (
     <div className="sov-metric-card">
-      <div
-        className="sov-metric-icon"
-        style={{ background: `${accentColor}18`, color: accentColor }}
-      >
+      <div className="sov-metric-icon">
         {icon}
       </div>
       <div className="sov-metric-body">
@@ -164,7 +159,6 @@ function SectionCard({
   title,
   icon,
   children,
-  accent,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -173,11 +167,8 @@ function SectionCard({
 }) {
   return (
     <div className="sov-section-card">
-      <div
-        className="sov-section-header"
-        style={{ borderLeftColor: accent ?? "var(--accent)" }}
-      >
-        <span className="sov-section-icon" style={{ color: accent ?? "var(--accent)" }}>
+      <div className="sov-section-header">
+        <span className="sov-section-icon">
           {icon}
         </span>
         <span className="sov-section-title">{title}</span>
@@ -192,14 +183,8 @@ function SectionCard({
 function SkeletonBlock({ w = "100%", h = 14 }: { w?: string; h?: number }) {
   return (
     <div
-      style={{
-        width: w,
-        height: h,
-        borderRadius: 4,
-        background: "var(--card)",
-        opacity: 0.6,
-        animation: "pulse 1.4s ease-in-out infinite",
-      }}
+      className="skeleton"
+      style={{ width: w, height: h, borderRadius: 4 }}
     />
   );
 }
@@ -413,7 +398,6 @@ export function SystemOverviewPage() {
               secondary={data.cpu_name}
               barValue={data.cpu_pct}
               barMax={100}
-              accentColor="var(--accent)"
             />
             <MetricCard
               icon={<MemoryStick size={18} />}
@@ -422,7 +406,6 @@ export function SystemOverviewPage() {
               secondary={ramLabel}
               barValue={data.ram_used_mb}
               barMax={data.ram_total_mb}
-              accentColor="var(--info)"
             />
             <MetricCard
               icon={<HardDrive size={18} />}
@@ -435,14 +418,12 @@ export function SystemOverviewPage() {
               secondary={data.storage_type}
               barValue={data.disk_used_gb}
               barMax={data.disk_total_gb}
-              accentColor="var(--warning)"
             />
             <MetricCard
               icon={<Clock size={18} />}
               label="System Uptime"
               primary={data.uptime_secs > 0 ? fmtUptime(data.uptime_secs) : "—"}
               secondary={data.os_hostname}
-              accentColor="var(--success)"
             />
           </div>
 
