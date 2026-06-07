@@ -20,7 +20,7 @@ interface AppStore {
 
 export const useAppStore = create<AppStore>((set) => ({
   isAdmin: false,
-  appVersion: "v1.5.0",
+  appVersion: "v1.9.0",
   currentPage: "",
   logs: [],
 

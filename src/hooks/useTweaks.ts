@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import type { TweakState, LogEntry, LogLevel, UnifiedTweak } from "../types";
 import { ALL_TWEAKS } from "../data/tweaks";
-import { applyTweak, revertTweak, checkAllTweakStatuses, detectNvidia, detectAmd, pickExeFile, applyExeFullscreenOpt } from "../invoke/tweaks";
+import { applyTweak, revertTweak, checkAllTweakStatuses, detectNvidia, detectAmd, pickExeFile, PER_EXE_APPLY } from "../invoke/tweaks";
 import { applyMinecraftPreset } from "../invoke/minecraft";
 import { isRunningAsAdmin, restartAsAdmin } from "../invoke/admin";
 import { useAppStore } from "../store/useAppStore";
@@ -117,12 +117,16 @@ export function useTweaks() {
     [tweakStates, setStatus, addLog]
   );
 
-  /** Special apply flow for disable-fullscreen-optimizations-selected-exe:
-   *  opens a native file picker first, then applies to the chosen exe. */
-  const doApplyExeFsOpt = useCallback(
+  /** Special apply flow for per-exe tweaks (fullscreen opt, process priority,
+   *  GPU preference): opens a native file picker first, then applies to the
+   *  chosen exe via the matching invoke from PER_EXE_APPLY. */
+  const doApplyExeTweak = useCallback(
     async (tweakId: string) => {
       const state = tweakStates[tweakId];
       if (!state || state.status === "applying" || state.status === "reverting") return;
+
+      const applyFn = PER_EXE_APPLY[tweakId];
+      if (!applyFn) return;
 
       setStatus(tweakId, { status: "applying" });
 
@@ -135,7 +139,7 @@ export function useTweaks() {
         }
 
         addLog(`Applying: ${state.tweak.name} → ${path}`, "info", tweakId);
-        const result = await applyExeFullscreenOpt(path);
+        const result = await applyFn(path);
 
         if (result.success) {
           setStatus(tweakId, { status: "applied", isApplied: true });
@@ -159,16 +163,16 @@ export function useTweaks() {
     (tweakId: string) => {
       const state = tweakStates[tweakId];
       if (!state) return;
-      // Per-exe fullscreen opt needs a file picker before applying
-      if (tweakId === "disable-fullscreen-optimizations-selected-exe") {
-        doApplyExeFsOpt(tweakId);
+      // Per-exe tweaks need a file picker before applying
+      if (PER_EXE_APPLY[tweakId]) {
+        doApplyExeTweak(tweakId);
       } else if (needsModal(state.tweak)) {
         setPendingApplyId(tweakId);
       } else {
         doApply(tweakId);
       }
     },
-    [tweakStates, doApply, doApplyExeFsOpt]
+    [tweakStates, doApply, doApplyExeTweak]
   );
 
   const confirmApply = useCallback(() => {

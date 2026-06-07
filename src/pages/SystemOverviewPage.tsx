@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useMemo } from "react";
 import {
   RefreshCw,
   CheckCircle2,
@@ -14,75 +13,15 @@ import {
   ShieldCheck,
   Monitor,
 } from "lucide-react";
+import { useCachedResource } from "../hooks/useCachedResource";
+import {
+  getSystemStatic,
+  getSystemLive,
+  type SystemOverview,
+  type DriverStatus,
+} from "../invoke/system";
 
-// ── Types matching the Rust SystemOverview struct (flat, snake_case) ────────
-
-type DriverStatus = "ok" | "outdated" | "unknown";
-
-interface DriverEntry {
-  name: string;
-  version: string;
-  date: string;
-  status: DriverStatus;
-  note: string;
-}
-
-interface SystemOverview {
-  // Real-time usage
-  cpu_pct: number;
-  ram_used_mb: number;
-  ram_total_mb: number;
-  disk_used_gb: number;
-  disk_total_gb: number;
-  uptime_secs: number;
-
-  // CPU
-  cpu_name: string;
-  cpu_cores: number;
-  cpu_threads: number;
-
-  // GPU
-  gpu_name: string;
-  gpu_vram_gb: number;
-  gpu_driver_version: string;
-
-  // RAM
-  ram_type: string;
-  ram_speed_mhz: number;
-
-  // Motherboard
-  motherboard: string;
-
-  // Storage (system drive)
-  storage_name: string;
-  storage_partition: string;
-  storage_gb: number;
-  storage_free_gb: number;
-  storage_media_type: string;
-  storage_bus_type: string;
-  storage_type: string;
-  storage_health: string;
-
-  // OS
-  os_name: string;
-  os_build: string;
-  os_version_tag: string;
-  os_install_date: string;
-  os_architecture: string;
-  os_locale: string;
-  os_hostname: string;
-
-  // BIOS / UEFI
-  bios_vendor: string;
-  bios_version: string;
-  bios_release_date: string;
-  bios_mode: string;
-  bios_secure_boot: boolean;
-  bios_age_days: number;
-
-  // Drivers
-  drivers: DriverEntry[];
-}
+// All System Overview types now live in ../invoke/system.ts.
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -318,34 +257,40 @@ function LoadingSkeleton() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function SystemOverviewPage() {
-  const [data, setData]           = useState<SystemOverview | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
-  const [refreshedAt, setRefreshedAt] = useState(0);
+  // Slow hardware/OS/BIOS info — fetched once and cached across page visits.
+  const staticRes = useCachedResource("system-static", getSystemStatic);
+  // Fast CPU/RAM/disk/uptime — polled every 2s, kept warm without blanking.
+  const liveRes = useCachedResource("system-live", getSystemLive, { pollMs: 2000 });
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<SystemOverview>("get_system_overview");
-      setData(result);
-      setRefreshedAt(Date.now());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refresh = () => {
+    void staticRes.refresh();
+    void liveRes.refresh();
+  };
+  const refreshing = staticRes.isRefreshing || liveRes.isRefreshing;
+  const refreshedAt = liveRes.lastUpdated ?? staticRes.lastUpdated ?? 0;
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  // Merge into the flat shape the cards render from. Live values override the
+  // (stale) live fields on the static struct, so nothing fresh is shown stale.
+  const data: SystemOverview | null = useMemo(() => {
+    if (!staticRes.data) return null;
+    const s = staticRes.data;
+    const live = liveRes.data;
+    return {
+      ...s,
+      cpu_pct: live?.cpu_pct ?? 0,
+      ram_used_mb: live?.ram_used_mb ?? 0,
+      ram_total_mb: live?.ram_total_mb || s.ram_total_mb,
+      disk_used_gb: live?.disk_used_gb ?? s.disk_used_gb ?? 0,
+      disk_total_gb: live?.disk_total_gb ?? s.disk_total_gb ?? 0,
+      uptime_secs: live?.uptime_secs ?? 0,
+    } as SystemOverview;
+  }, [staticRes.data, liveRes.data]);
 
-  // Show skeleton while initial data is loading
-  if (loading && data === null) return <LoadingSkeleton />;
+  // Skeleton only on the very first load (no cached static data yet).
+  if (staticRes.isLoading && !staticRes.data) return <LoadingSkeleton />;
 
-  // Error state
-  if (error && data === null) {
+  // Hard error only when there is nothing cached to show.
+  if (staticRes.error && !staticRes.data) {
     return (
       <div className="page-wrapper">
         <div className="page-scroll">
@@ -361,7 +306,7 @@ export function SystemOverviewPage() {
             </div>
             <div className="sov-alert sov-alert--warn" style={{ margin: "12px 0" }}>
               <AlertTriangle size={13} />
-              <span>{error}</span>
+              <span>{staticRes.error}</span>
             </div>
             <button className="tools-icon-btn" onClick={refresh} style={{ padding: "6px 16px", gap: 6 }}>
               <RefreshCw size={13} />
@@ -421,10 +366,10 @@ export function SystemOverviewPage() {
               <button
                 className="tools-icon-btn"
                 onClick={refresh}
-                disabled={loading}
+                disabled={refreshing}
                 title="Refresh"
               >
-                <RefreshCw size={13} className={loading ? "spin" : ""} />
+                <RefreshCw size={13} className={refreshing ? "spin" : ""} />
               </button>
               {refreshedAt > 0 && (
                 <span className="sov-refresh-time">

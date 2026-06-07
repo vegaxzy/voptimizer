@@ -3,6 +3,7 @@ import {
   Archive,
   Wrench,
   Monitor,
+  Trash2,
   ShieldCheck,
   ShieldAlert,
   Gauge,
@@ -20,6 +21,7 @@ export interface SidebarTool {
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   "system-overview": <Monitor size={13} strokeWidth={1.8} />,
+  "debloat":         <Trash2  size={13} strokeWidth={1.8} />,
   "startup-apps":    <Rocket  size={13} strokeWidth={1.8} />,
   "backup-restore":  <Archive size={13} strokeWidth={1.8} />,
   "gaming-tools":    <Wrench  size={13} strokeWidth={1.8} />,

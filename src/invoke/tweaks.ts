@@ -36,3 +36,20 @@ export async function pickExeFile(): Promise<string | null> {
 export async function applyExeFullscreenOpt(path: string): Promise<TweakOpResult> {
   return invoke<TweakOpResult>("apply_exe_fullscreen_opt", { path });
 }
+
+/** Sets a High process-priority profile (IFEO PerfOptions) for the given exe. */
+export async function applyExePriority(path: string): Promise<TweakOpResult> {
+  return invoke<TweakOpResult>("apply_exe_priority", { path });
+}
+
+/** Sets the high-performance GPU preference (HKCU) for the given exe. */
+export async function applyExeGpuPref(path: string): Promise<TweakOpResult> {
+  return invoke<TweakOpResult>("apply_exe_gpu_pref", { path });
+}
+
+/** Maps a per-exe tweak id → its apply invoke. Used by the file-picker flow. */
+export const PER_EXE_APPLY: Record<string, (path: string) => Promise<TweakOpResult>> = {
+  "disable-fullscreen-optimizations-selected-exe": applyExeFullscreenOpt,
+  "set-game-priority-selected-exe": applyExePriority,
+  "prefer-high-perf-gpu-selected-exe": applyExeGpuPref,
+};

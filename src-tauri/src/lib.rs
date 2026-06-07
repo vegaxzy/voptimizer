@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 mod admin;
 mod backup;
+mod debloat;
 mod minecraft;
 mod startup;
 mod system_info;
@@ -10,13 +11,14 @@ mod tweaks_impl;
 mod util;
 
 use backup::{BackupEntry, BackupOpResult, HistoryEntry, RestorePointStatus};
+use debloat::{AppxPackage, CleanCategory, DebloatResult};
 use minecraft::{DnsInfo, PingResult, PresetResult, ProcessInfo, SystemInfo};
 use startup::{StartupApp, StartupOpResult};
 use tools::{
     BenchmarkComparison, BenchmarkStateResult, CleanResult, GameSessionStatus, MinecraftMonitor,
     OverlayInfo, ProcessLoad, ShaderCacheEntry, SystemSnapshot,
 };
-use system_info::SystemOverview;
+use system_info::{SystemLive, SystemOverview};
 use tweaks_impl::TweakOpResult;
 
 // ── Tweak commands ─────────────────────────────────────────────────────────
@@ -91,6 +93,40 @@ async fn apply_exe_fullscreen_opt(path: String) -> Result<TweakOpResult, String>
         action: "apply_tweak".to_string(),
         category: "tweak".to_string(),
         target: format!("disable-fullscreen-optimizations-selected-exe:{}", path),
+        success: result.success,
+        message: result.message.clone(),
+        ..Default::default()
+    });
+    Ok(result)
+}
+
+/// Applies a High process-priority profile (IFEO PerfOptions) to a chosen exe.
+#[tauri::command]
+async fn apply_exe_priority(path: String) -> Result<TweakOpResult, String> {
+    let result = tweaks_impl::apply_exe_priority_pub(&path);
+    backup::record_history(HistoryEntry {
+        id: backup::new_id(),
+        timestamp: backup::now_ms(),
+        action: "apply_tweak".to_string(),
+        category: "tweak".to_string(),
+        target: format!("set-game-priority-selected-exe:{}", path),
+        success: result.success,
+        message: result.message.clone(),
+        ..Default::default()
+    });
+    Ok(result)
+}
+
+/// Sets the high-performance GPU preference (HKCU UserGpuPreferences) for a chosen exe.
+#[tauri::command]
+async fn apply_exe_gpu_pref(path: String) -> Result<TweakOpResult, String> {
+    let result = tweaks_impl::apply_exe_gpu_pref_pub(&path);
+    backup::record_history(HistoryEntry {
+        id: backup::new_id(),
+        timestamp: backup::now_ms(),
+        action: "apply_tweak".to_string(),
+        category: "tweak".to_string(),
+        target: format!("prefer-high-perf-gpu-selected-exe:{}", path),
         success: result.success,
         message: result.message.clone(),
         ..Default::default()
@@ -415,11 +451,67 @@ async fn clear_benchmark() -> Result<(), String> {
     Ok(())
 }
 
+// ── Debloat (Temp & Cache Cleaner) ──────────────────────────────────────────
+
+#[tauri::command]
+async fn scan_cleanup() -> Result<Vec<CleanCategory>, String> {
+    Ok(debloat::scan_cleanup_impl())
+}
+
+#[tauri::command]
+async fn clean_cleanup(ids: Vec<String>) -> Result<DebloatResult, String> {
+    let result = debloat::clean_cleanup_impl(ids);
+    backup::record_history(HistoryEntry {
+        id: backup::new_id(),
+        timestamp: backup::now_ms(),
+        action: "debloat_clean".to_string(),
+        category: "debloat".to_string(),
+        target: format!("{} categories", result.categories_cleaned),
+        success: result.success,
+        message: result.message.clone(),
+        ..Default::default()
+    });
+    Ok(result)
+}
+
+#[tauri::command]
+async fn list_appx() -> Result<Vec<AppxPackage>, String> {
+    Ok(debloat::list_appx_impl())
+}
+
+#[tauri::command]
+async fn remove_appx(ids: Vec<String>) -> Result<DebloatResult, String> {
+    let result = debloat::remove_appx_impl(ids);
+    backup::record_history(HistoryEntry {
+        id: backup::new_id(),
+        timestamp: backup::now_ms(),
+        action: "debloat_remove_appx".to_string(),
+        category: "debloat".to_string(),
+        target: format!("{} apps", result.categories_cleaned),
+        success: result.success,
+        message: result.message.clone(),
+        ..Default::default()
+    });
+    Ok(result)
+}
+
 // ── System overview ────────────────────────────────────────────────────────
 
 #[tauri::command]
 async fn get_system_overview() -> Result<SystemOverview, String> {
     Ok(system_info::get_system_overview_impl())
+}
+
+/// Slow, static hardware/OS/BIOS/driver info — fetch once and cache in the UI.
+#[tauri::command]
+async fn get_system_static() -> Result<SystemOverview, String> {
+    Ok(system_info::get_system_static_impl())
+}
+
+/// Fast live metrics (CPU%, RAM, disk, uptime) via Win32 FFI — poll frequently.
+#[tauri::command]
+async fn get_system_live() -> Result<SystemLive, String> {
+    Ok(system_info::get_system_live_impl())
 }
 
 // ── App entry ──────────────────────────────────────────────────────────────
@@ -431,6 +523,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // System Overview
             get_system_overview,
+            get_system_static,
+            get_system_live,
+            // Debloat
+            scan_cleanup,
+            clean_cleanup,
+            list_appx,
+            remove_appx,
             // Admin
             is_running_as_admin,
             restart_as_admin,
@@ -443,6 +542,8 @@ pub fn run() {
             detect_amd,
             pick_exe_file,
             apply_exe_fullscreen_opt,
+            apply_exe_priority,
+            apply_exe_gpu_pref,
             // Startup
             list_startup_apps,
             disable_startup_app,

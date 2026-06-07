@@ -7,12 +7,14 @@ import { CategoryPage } from "./components/CategoryPage";
 import { StartupAppsPage } from "./pages/StartupAppsPage";
 import { BackupRestorePage } from "./pages/BackupRestorePage";
 import { SystemOverviewPage } from "./pages/SystemOverviewPage";
+import { DebloatPage } from "./pages/DebloatPage";
 import { ToolsPage } from "./pages/ToolsPage";
 import { useTweaks } from "./hooks/useTweaks";
 import { useAppStore } from "./store/useAppStore";
 
 const TOOLS: SidebarTool[] = [
   { id: "system-overview", name: "System Overview",  icon: "🖥️" },
+  { id: "debloat",         name: "Debloat",          icon: "🧹" },
   { id: "startup-apps",    name: "Startup Apps",     icon: "🚀" },
   { id: "backup-restore",  name: "Backup & Restore", icon: "🛡️" },
   { id: "gaming-tools",    name: "Gaming Tools",     icon: "🔧" },
@@ -88,6 +90,8 @@ function App() {
       <div className="main-area">
         {activePage === "system-overview" ? (
           <SystemOverviewPage />
+        ) : activePage === "debloat" ? (
+          <DebloatPage isAdmin={isAdmin} onRestartAsAdmin={restartAsAdmin} />
         ) : activePage === "startup-apps" ? (
           <StartupAppsPage isAdmin={isAdmin} onRestartAsAdmin={restartAsAdmin} />
         ) : activePage === "backup-restore" ? (

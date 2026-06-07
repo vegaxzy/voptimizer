@@ -2214,6 +2214,889 @@ fn revert_exe_fsopt_impl(state: &mut ExpState) -> TweakOpResult {
     result
 }
 
+// ── Keep Kernel in RAM (DisablePagingExecutive) ──────────────────────────────
+// Adapted from Fortnite-Optimizer (verifyOptimizations referenced this value).
+// Keeps the kernel + drivers resident in RAM instead of paging them to disk.
+// Safe on systems with ample RAM; mild benefit. Fully reversible.
+
+const MEM_MGMT_PATH: &str =
+    "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management";
+
+fn apply_keep_kernel_in_ram(state: &mut ExpState) -> TweakOpResult {
+    apply_hklm_dword(
+        state,
+        "keep-kernel-in-ram",
+        MEM_MGMT_PATH,
+        "DisablePagingExecutive",
+        1,
+        0,
+        "Kernel and drivers kept resident in RAM (DisablePagingExecutive=1). Restart to apply.",
+    )
+}
+
+fn revert_keep_kernel_in_ram(state: &mut ExpState) -> TweakOpResult {
+    revert_hklm_dword(
+        state,
+        "keep-kernel-in-ram",
+        MEM_MGMT_PATH,
+        "DisablePagingExecutive",
+        0,
+        "Kernel paging restored to Windows default (DisablePagingExecutive=0). Restart to apply.",
+    )
+}
+
+// ── Disable CPU Core Parking (powercfg) ──────────────────────────────────────
+// Adapted from Fortnite-Optimizer's optimizeCPUParking().
+// Keeps all CPU cores unparked for more consistent frame times.
+//
+// The repo only ever SET values (powercfg has no `getacvalueindex` subcommand —
+// reading must come from the registry). We read the original per-scheme override
+// from the registry so revert is exact: if the user had no explicit override we
+// delete ours to return to the plan default; otherwise we restore their value.
+
+const PWR_SUBGROUP_PROCESSOR: &str = "54533251-82be-4824-96c1-47b60b740d00";
+const PWR_SETTING_CPMINCORES: &str = "0cc5b647-c1df-4637-891a-dec35c318583";
+const PWR_SETTING_CPMAXCORES: &str = "ea062031-0e34-4ff1-9b6d-eb1059334028";
+// USB settings subgroup + "USB selective suspend setting"
+const PWR_SUBGROUP_USB: &str = "2a737441-1930-4402-8d77-b2bebba308a3";
+const PWR_SETTING_USB_SUSPEND: &str = "48e6b7a6-50f5-4782-a5d4-53bb8f07e226";
+
+fn power_setting_reg_path(scheme: &str, subgroup: &str, setting: &str) -> String {
+    format!(
+        "SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\{}\\{}\\{}",
+        scheme, subgroup, setting
+    )
+}
+
+/// Reads the AC override index from the registry, or None if no override is set
+/// (the setting is at the plan default).
+fn read_ac_setting_index(scheme: &str, subgroup: &str, setting: &str) -> Option<u32> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(power_setting_reg_path(scheme, subgroup, setting))
+        .ok()
+        .and_then(|k| k.get_value::<u32, _>("ACSettingIndex").ok())
+}
+
+/// Deletes our AC override so the setting reverts to the plan default.
+fn delete_ac_override(scheme: &str, subgroup: &str, setting: &str) {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    if let Ok(k) = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(power_setting_reg_path(scheme, subgroup, setting), KEY_ALL_ACCESS)
+    {
+        let _ = k.delete_value("ACSettingIndex");
+    }
+}
+
+/// Sets a power-setting AC index via powercfg using explicit GUIDs
+/// (many of these setting aliases are hidden by default, so we avoid them).
+fn powercfg_set_ac_index(subgroup: &str, setting: &str, value: u32) -> bool {
+    no_window_cmd(powercfg_exe())
+        .args([
+            "/setacvalueindex",
+            "SCHEME_CURRENT",
+            subgroup,
+            setting,
+            &value.to_string(),
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn powercfg_activate_current() -> bool {
+    no_window_cmd(powercfg_exe())
+        .args(["/setactive", "SCHEME_CURRENT"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn apply_core_parking(state: &mut ExpState) -> TweakOpResult {
+    let scheme = match get_active_power_scheme() {
+        Some(s) => s,
+        None => {
+            return TweakOpResult::fail(
+                "Could not read the active power scheme",
+                "powercfg /getactivescheme failed",
+            )
+        }
+    };
+    state
+        .saved_strings
+        .entry("disable-core-parking:scheme".into())
+        .or_insert(scheme.clone());
+    // Record whether an explicit override existed so revert can be exact.
+    match read_ac_setting_index(&scheme, PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMINCORES) {
+        Some(v) => {
+            state
+                .saved_dwords
+                .entry("disable-core-parking:CPMINCORES".into())
+                .or_insert(v);
+            state
+                .saved_strings
+                .entry("disable-core-parking:existed".into())
+                .or_insert("1".into());
+        }
+        None => {
+            state
+                .saved_strings
+                .entry("disable-core-parking:existed".into())
+                .or_insert("0".into());
+        }
+    }
+
+    let ok_min = powercfg_set_ac_index(PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMINCORES, 100);
+    // CPMAXCORES = 100 (all cores available) matches the default; set for safety.
+    let _ = powercfg_set_ac_index(PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMAXCORES, 100);
+    let ok_active = powercfg_activate_current();
+    if ok_min && ok_active {
+        state.applied.insert("disable-core-parking".into(), true);
+        TweakOpResult::ok("CPU core parking disabled — all cores kept unparked")
+    } else {
+        TweakOpResult::fail(
+            "Failed to disable core parking — run VOptimizer as administrator",
+            "powercfg /setacvalueindex failed",
+        )
+    }
+}
+
+fn revert_core_parking(state: &mut ExpState) -> TweakOpResult {
+    let scheme = state
+        .saved_strings
+        .get("disable-core-parking:scheme")
+        .cloned()
+        .or_else(get_active_power_scheme)
+        .unwrap_or_default();
+    let existed = state
+        .saved_strings
+        .get("disable-core-parking:existed")
+        .map(|s| s == "1")
+        .unwrap_or(false);
+
+    if existed {
+        // Restore the user's explicit override exactly.
+        let orig = state
+            .saved_dwords
+            .get("disable-core-parking:CPMINCORES")
+            .copied()
+            .unwrap_or(100);
+        powercfg_set_ac_index(PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMINCORES, orig);
+    } else if !scheme.is_empty() {
+        // No override existed — remove ours to return to the plan default.
+        delete_ac_override(&scheme, PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMINCORES);
+        delete_ac_override(&scheme, PWR_SUBGROUP_PROCESSOR, PWR_SETTING_CPMAXCORES);
+    }
+    let ok_active = powercfg_activate_current();
+
+    state.applied.remove("disable-core-parking");
+    state.saved_dwords.remove("disable-core-parking:CPMINCORES");
+    state.saved_strings.remove("disable-core-parking:scheme");
+    state.saved_strings.remove("disable-core-parking:existed");
+
+    if ok_active {
+        TweakOpResult::ok("CPU core parking restored to previous setting")
+    } else {
+        TweakOpResult::fail(
+            "Failed to reactivate the power scheme — run VOptimizer as administrator",
+            "powercfg /setactive failed",
+        )
+    }
+}
+
+// ── Disable USB Selective Suspend (powercfg) ─────────────────────────────────
+// Adapted from ToX. Stops Windows power-gating USB devices (mice/keyboards/
+// controllers), preventing brief input dropouts. Reversible — restores the
+// user's prior override, or removes ours to return to the plan default (1).
+
+fn apply_usb_suspend(state: &mut ExpState) -> TweakOpResult {
+    let scheme = match get_active_power_scheme() {
+        Some(s) => s,
+        None => {
+            return TweakOpResult::fail(
+                "Could not read the active power scheme",
+                "powercfg /getactivescheme failed",
+            )
+        }
+    };
+    state
+        .saved_strings
+        .entry("disable-usb-selective-suspend:scheme".into())
+        .or_insert(scheme.clone());
+    match read_ac_setting_index(&scheme, PWR_SUBGROUP_USB, PWR_SETTING_USB_SUSPEND) {
+        Some(v) => {
+            state
+                .saved_dwords
+                .entry("disable-usb-selective-suspend:val".into())
+                .or_insert(v);
+            state
+                .saved_strings
+                .entry("disable-usb-selective-suspend:existed".into())
+                .or_insert("1".into());
+        }
+        None => {
+            state
+                .saved_strings
+                .entry("disable-usb-selective-suspend:existed".into())
+                .or_insert("0".into());
+        }
+    }
+    // 0 = Disabled (the goal). Default is 1 = Enabled.
+    let ok = powercfg_set_ac_index(PWR_SUBGROUP_USB, PWR_SETTING_USB_SUSPEND, 0);
+    let ok_active = powercfg_activate_current();
+    if ok && ok_active {
+        state
+            .applied
+            .insert("disable-usb-selective-suspend".into(), true);
+        TweakOpResult::ok("USB selective suspend disabled — USB devices stay powered")
+    } else {
+        TweakOpResult::fail(
+            "Failed to disable USB selective suspend — run VOptimizer as administrator",
+            "powercfg /setacvalueindex failed",
+        )
+    }
+}
+
+fn revert_usb_suspend(state: &mut ExpState) -> TweakOpResult {
+    let scheme = state
+        .saved_strings
+        .get("disable-usb-selective-suspend:scheme")
+        .cloned()
+        .or_else(get_active_power_scheme)
+        .unwrap_or_default();
+    let existed = state
+        .saved_strings
+        .get("disable-usb-selective-suspend:existed")
+        .map(|s| s == "1")
+        .unwrap_or(false);
+    if existed {
+        let orig = state
+            .saved_dwords
+            .get("disable-usb-selective-suspend:val")
+            .copied()
+            .unwrap_or(1);
+        powercfg_set_ac_index(PWR_SUBGROUP_USB, PWR_SETTING_USB_SUSPEND, orig);
+    } else if !scheme.is_empty() {
+        delete_ac_override(&scheme, PWR_SUBGROUP_USB, PWR_SETTING_USB_SUSPEND);
+    }
+    let ok_active = powercfg_activate_current();
+    state.applied.remove("disable-usb-selective-suspend");
+    state.saved_dwords.remove("disable-usb-selective-suspend:val");
+    state
+        .saved_strings
+        .remove("disable-usb-selective-suspend:scheme");
+    state
+        .saved_strings
+        .remove("disable-usb-selective-suspend:existed");
+    if ok_active {
+        TweakOpResult::ok("USB selective suspend restored to previous setting")
+    } else {
+        TweakOpResult::fail(
+            "Failed to reactivate the power scheme — run VOptimizer as administrator",
+            "powercfg /setactive failed",
+        )
+    }
+}
+
+// ── Disable Hibernate (powercfg /hibernate off) ──────────────────────────────
+// Adapted from ToX. Frees a RAM-sized hiberfil.sys and disables hibernate /
+// Fast Startup. Reversible with /hibernate on.
+
+fn apply_disable_hibernate(state: &mut ExpState) -> TweakOpResult {
+    match no_window_cmd(powercfg_exe())
+        .args(["/hibernate", "off"])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            state.applied.insert("disable-hibernate".into(), true);
+            TweakOpResult::ok("Hibernate disabled — hiberfil.sys freed, Fast Startup off")
+        }
+        Ok(_) => TweakOpResult::fail(
+            "Failed to disable hibernate — run VOptimizer as administrator",
+            "powercfg /hibernate off failed",
+        ),
+        Err(e) => TweakOpResult::fail("Could not run powercfg.exe", e.to_string()),
+    }
+}
+
+fn revert_disable_hibernate(state: &mut ExpState) -> TweakOpResult {
+    match no_window_cmd(powercfg_exe())
+        .args(["/hibernate", "on"])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            state.applied.remove("disable-hibernate");
+            TweakOpResult::ok("Hibernate re-enabled")
+        }
+        Ok(_) => TweakOpResult::fail(
+            "Failed to re-enable hibernate — run VOptimizer as administrator",
+            "powercfg /hibernate on failed",
+        ),
+        Err(e) => TweakOpResult::fail("Could not run powercfg.exe", e.to_string()),
+    }
+}
+
+// ── Disable Mouse Acceleration (HKCU Control Panel\Mouse) ─────────────────────
+// Adapted from ToX (implemented correctly here). Sets pointer-precision off for
+// raw 1:1 mouse input. Defaults restored on revert (1 / 6 / 10).
+
+const MOUSE_PATH: &str = "Control Panel\\Mouse";
+
+fn apply_mouse_accel(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(MOUSE_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open Mouse registry key", e.to_string()),
+    };
+    // Save originals (REG_SZ), defaulting to Windows defaults if absent.
+    for (name, default) in [
+        ("MouseSpeed", "1"),
+        ("MouseThreshold1", "6"),
+        ("MouseThreshold2", "10"),
+    ] {
+        let orig: String = key.get_value(name).unwrap_or_else(|_| default.to_string());
+        state
+            .saved_strings
+            .entry(format!("disable-mouse-accel:{}", name))
+            .or_insert(orig);
+        if let Err(e) = key.set_value(name, &"0") {
+            return TweakOpResult::fail("Failed to write Mouse registry value", e.to_string());
+        }
+    }
+    state.applied.insert("disable-mouse-accel".into(), true);
+    TweakOpResult::ok("Mouse acceleration disabled — sign out and back in to apply")
+}
+
+fn revert_mouse_accel(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(MOUSE_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open Mouse registry key", e.to_string()),
+    };
+    for (name, default) in [
+        ("MouseSpeed", "1"),
+        ("MouseThreshold1", "6"),
+        ("MouseThreshold2", "10"),
+    ] {
+        let save_key = format!("disable-mouse-accel:{}", name);
+        let orig = state
+            .saved_strings
+            .get(&save_key)
+            .cloned()
+            .unwrap_or_else(|| default.to_string());
+        let _ = key.set_value(name, &orig.as_str());
+        state.saved_strings.remove(&save_key);
+    }
+    state.applied.remove("disable-mouse-accel");
+    TweakOpResult::ok("Mouse acceleration restored — sign out and back in to apply")
+}
+
+// ── Fastest Keyboard Repeat (HKCU Control Panel\Keyboard) ─────────────────────
+// Adapted from ToX. Shortest repeat delay + fastest repeat rate.
+
+const KEYBOARD_PATH: &str = "Control Panel\\Keyboard";
+
+fn apply_fast_keyboard(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(KEYBOARD_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open Keyboard registry key", e.to_string()),
+    };
+    // KeyboardDelay default "1", KeyboardSpeed default "31".
+    for (name, default, new) in [("KeyboardDelay", "1", "0"), ("KeyboardSpeed", "31", "31")] {
+        let orig: String = key.get_value(name).unwrap_or_else(|_| default.to_string());
+        state
+            .saved_strings
+            .entry(format!("fast-keyboard-repeat:{}", name))
+            .or_insert(orig);
+        if let Err(e) = key.set_value(name, &new) {
+            return TweakOpResult::fail("Failed to write Keyboard registry value", e.to_string());
+        }
+    }
+    state.applied.insert("fast-keyboard-repeat".into(), true);
+    TweakOpResult::ok("Keyboard repeat set to fastest — sign out and back in to apply")
+}
+
+fn revert_fast_keyboard(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(KEYBOARD_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open Keyboard registry key", e.to_string()),
+    };
+    for (name, default) in [("KeyboardDelay", "1"), ("KeyboardSpeed", "31")] {
+        let save_key = format!("fast-keyboard-repeat:{}", name);
+        let orig = state
+            .saved_strings
+            .get(&save_key)
+            .cloned()
+            .unwrap_or_else(|| default.to_string());
+        let _ = key.set_value(name, &orig.as_str());
+        state.saved_strings.remove(&save_key);
+    }
+    state.applied.remove("fast-keyboard-repeat");
+    TweakOpResult::ok("Keyboard repeat restored — sign out and back in to apply")
+}
+
+// ── Foreground Boost (Win32PrioritySeparation) ───────────────────────────────
+// Adapted from ToX. Tunes the scheduler quantum to favour the foreground app.
+// Unproven on modern multi-core CPUs but harmless and reversible (default 2).
+
+const PRIORITY_CONTROL_PATH: &str = "SYSTEM\\CurrentControlSet\\Control\\PriorityControl";
+
+fn apply_foreground_boost(state: &mut ExpState) -> TweakOpResult {
+    apply_hklm_dword(
+        state,
+        "foreground-boost",
+        PRIORITY_CONTROL_PATH,
+        "Win32PrioritySeparation",
+        0x1A, // short, variable quantums with a 3x foreground boost
+        2,
+        "Foreground boost enabled (Win32PrioritySeparation = 0x1A)",
+    )
+}
+
+fn revert_foreground_boost(state: &mut ExpState) -> TweakOpResult {
+    revert_hklm_dword(
+        state,
+        "foreground-boost",
+        PRIORITY_CONTROL_PATH,
+        "Win32PrioritySeparation",
+        2,
+        "Foreground boost reverted to Windows default (Win32PrioritySeparation = 2)",
+    )
+}
+
+// ── Disable Network Adapter Power Saving (per-adapter PnPCapabilities) ────────
+// Adapted from ToX's Disable-NetAdapterPowerManagement, implemented as a
+// reversible registry edit: PnPCapabilities = 24 (0x18) disables "Allow the
+// computer to turn off this device". Original values are saved per adapter.
+
+const NET_CLASS_PATH: &str =
+    "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}";
+
+/// Returns full registry paths of PHYSICAL network adapters only. A physical
+/// adapter's ComponentId starts with "PCI\" or "USB\"; this filters out WAN
+/// miniports (ms_*), the kernel-debug adapter (root\kdnic), and other virtual
+/// adapters that have a NetCfgInstanceId but no real power management.
+fn enumerate_net_adapter_keys() -> Vec<String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let mut out = vec![];
+    if let Ok(class_key) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(NET_CLASS_PATH) {
+        for sub in class_key.enum_keys().flatten() {
+            if sub.len() == 4 && sub.chars().all(|c| c.is_ascii_digit()) {
+                let full = format!("{}\\{}", NET_CLASS_PATH, sub);
+                if let Ok(k) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(&full) {
+                    if k.get_value::<String, _>("NetCfgInstanceId").is_err() {
+                        continue;
+                    }
+                    let component: String =
+                        k.get_value("ComponentId").unwrap_or_default();
+                    let c = component.to_ascii_lowercase();
+                    if c.starts_with("pci\\") || c.starts_with("usb\\") {
+                        out.push(full);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn apply_nic_power_saving(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "disable-nic-power-saving";
+    let keys = enumerate_net_adapter_keys();
+    if keys.is_empty() {
+        return TweakOpResult::fail(
+            "No network adapters found in the registry",
+            "net class enumeration returned nothing",
+        );
+    }
+    let mut count = 0u32;
+    let mut last_err = String::new();
+    for (i, path) in keys.iter().enumerate() {
+        match RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(path, KEY_ALL_ACCESS) {
+            Ok(k) => {
+                let orig = k.get_value::<u32, _>("PnPCapabilities").ok();
+                state
+                    .saved_strings
+                    .entry(format!("{}:path:{}", ID, i))
+                    .or_insert(path.clone());
+                match orig {
+                    Some(v) => {
+                        state
+                            .saved_dwords
+                            .entry(format!("{}:orig:{}", ID, i))
+                            .or_insert(v);
+                        state
+                            .saved_strings
+                            .entry(format!("{}:existed:{}", ID, i))
+                            .or_insert("1".into());
+                    }
+                    None => {
+                        state
+                            .saved_strings
+                            .entry(format!("{}:existed:{}", ID, i))
+                            .or_insert("0".into());
+                    }
+                }
+                // 0x18 (24) = disable "allow the computer to turn off this device"
+                if k.set_value("PnPCapabilities", &24u32).is_ok() {
+                    count += 1;
+                }
+            }
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+    if count > 0 {
+        state
+            .saved_dwords
+            .insert(format!("{}:count", ID), keys.len() as u32);
+        state.applied.insert(ID.into(), true);
+        TweakOpResult::ok(format!(
+            "Power saving disabled on {} network adapter(s) — restart to fully apply",
+            count
+        ))
+    } else {
+        TweakOpResult::fail(
+            "Failed to disable NIC power saving — run VOptimizer as administrator",
+            last_err,
+        )
+    }
+}
+
+fn revert_nic_power_saving(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "disable-nic-power-saving";
+    let count = state
+        .saved_dwords
+        .get(&format!("{}:count", ID))
+        .copied()
+        .unwrap_or(0);
+    for i in 0..count {
+        if let Some(path) = state.saved_strings.get(&format!("{}:path:{}", ID, i)).cloned() {
+            let existed = state
+                .saved_strings
+                .get(&format!("{}:existed:{}", ID, i))
+                .map(|s| s == "1")
+                .unwrap_or(false);
+            if let Ok(k) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(&path, KEY_ALL_ACCESS)
+            {
+                if existed {
+                    let orig = state
+                        .saved_dwords
+                        .get(&format!("{}:orig:{}", ID, i))
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = k.set_value("PnPCapabilities", &orig);
+                } else {
+                    let _ = k.delete_value("PnPCapabilities");
+                }
+            }
+        }
+    }
+    // Remove all saved entries for this tweak
+    let prefix = format!("{}:", ID);
+    state.saved_strings.retain(|k, _| !k.starts_with(&prefix));
+    state.saved_dwords.retain(|k, _| !k.starts_with(&prefix));
+    state.applied.remove(ID);
+    TweakOpResult::ok("Network adapter power saving restored to previous settings")
+}
+
+// ── Disable Large Send Offload (PowerShell, unproven) ────────────────────────
+// Adapted from ToX's Disable-NetAdapterLso. Reversible via Enable-NetAdapterLso.
+
+fn apply_disable_lso(state: &mut ExpState) -> TweakOpResult {
+    let ps = ps_exe();
+    let script = "Disable-NetAdapterLso -Name '*' -ErrorAction SilentlyContinue; Write-Output 'ok'";
+    match no_window_cmd(&ps)
+        .args(["-NonInteractive", "-NoProfile", "-Command", script])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            state.applied.insert("disable-lso".into(), true);
+            TweakOpResult::ok("Large Send Offload disabled on all adapters")
+        }
+        Ok(o) => TweakOpResult::fail(
+            "Failed to disable LSO — run VOptimizer as administrator",
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        ),
+        Err(e) => TweakOpResult::fail("Failed to run PowerShell", e.to_string()),
+    }
+}
+
+fn revert_disable_lso(state: &mut ExpState) -> TweakOpResult {
+    let ps = ps_exe();
+    let script = "Enable-NetAdapterLso -Name '*' -ErrorAction SilentlyContinue; Write-Output 'ok'";
+    match no_window_cmd(&ps)
+        .args(["-NonInteractive", "-NoProfile", "-Command", script])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            state.applied.remove("disable-lso");
+            TweakOpResult::ok("Large Send Offload re-enabled on all adapters")
+        }
+        Ok(o) => TweakOpResult::fail(
+            "Failed to re-enable LSO — run VOptimizer as administrator",
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        ),
+        Err(e) => TweakOpResult::fail("Failed to run PowerShell", e.to_string()),
+    }
+}
+
+// ── Per-exe: Set Game Process Priority (IFEO PerfOptions) ─────────────────────
+// Adapted from Fortnite-Optimizer's optimizeProcessPriority(), generalized to
+// any user-chosen exe (instead of hardcoding FortniteClient-Win64-Shipping.exe).
+// Uses High (3), never Realtime (4) — realtime can starve the OS.
+
+const IFEO_PATH: &str =
+    "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+
+fn apply_exe_priority_impl(state: &mut ExpState, exe_path: &str) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "set-game-priority-selected-exe";
+    // IFEO matches on the bare file name, not the full path.
+    let exe_name = std::path::Path::new(exe_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(exe_path)
+        .to_string();
+
+    if let Some(saved) = state.saved_strings.get("exe-priority:exe") {
+        if saved != &exe_name {
+            return TweakOpResult::fail(
+                "A different executable already has saved priority state",
+                "Revert the current one before applying this tweak to another file",
+            );
+        }
+    }
+
+    let perf_path = format!("{}\\{}\\PerfOptions", IFEO_PATH, exe_name);
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let (key, _) = match hklm.create_subkey(&perf_path) {
+        Ok(k) => k,
+        Err(e) => {
+            return TweakOpResult::fail(
+                "Cannot open IFEO registry key — administrator privileges required",
+                e.to_string(),
+            )
+        }
+    };
+
+    let existed = key.get_value::<u32, _>("CpuPriorityClass").ok();
+    state
+        .saved_strings
+        .entry("exe-priority:path".into())
+        .or_insert(exe_path.to_string());
+    state
+        .saved_strings
+        .entry("exe-priority:exe".into())
+        .or_insert(exe_name.clone());
+    match existed {
+        Some(o) => {
+            state
+                .saved_dwords
+                .entry("exe-priority:CpuPriorityClass".into())
+                .or_insert(o);
+            state
+                .saved_strings
+                .entry("exe-priority:existed".into())
+                .or_insert("1".into());
+        }
+        None => {
+            state
+                .saved_strings
+                .entry("exe-priority:existed".into())
+                .or_insert("0".into());
+        }
+    }
+
+    // CpuPriorityClass = 3 (High). IoPriority = 3 (High), PagePriority = 5 (High).
+    if let Err(e) = key.set_value("CpuPriorityClass", &3u32) {
+        return TweakOpResult::fail("Failed to write process priority", e.to_string());
+    }
+    let _ = key.set_value("IoPriority", &3u32);
+    let _ = key.set_value("PagePriority", &5u32);
+
+    state.applied.insert(ID.into(), true);
+    TweakOpResult::ok(format!(
+        "High priority set for {} — restart the game to take effect.",
+        exe_name
+    ))
+}
+
+fn revert_exe_priority_impl(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "set-game-priority-selected-exe";
+    let exe_name = match state.saved_strings.get("exe-priority:exe").cloned() {
+        Some(n) => n,
+        None => {
+            state.applied.remove(ID);
+            return TweakOpResult::ok("No per-exe priority to revert");
+        }
+    };
+    let existed = state
+        .saved_strings
+        .get("exe-priority:existed")
+        .map(|s| s == "1")
+        .unwrap_or(false);
+    let perf_path = format!("{}\\{}\\PerfOptions", IFEO_PATH, exe_name);
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+
+    if let Ok(key) = hklm.open_subkey_with_flags(&perf_path, KEY_ALL_ACCESS) {
+        if existed {
+            let orig = state
+                .saved_dwords
+                .get("exe-priority:CpuPriorityClass")
+                .copied()
+                .unwrap_or(2);
+            let _ = key.set_value("CpuPriorityClass", &orig);
+            let _ = key.delete_value("IoPriority");
+            let _ = key.delete_value("PagePriority");
+        } else {
+            let _ = key.delete_value("CpuPriorityClass");
+            let _ = key.delete_value("IoPriority");
+            let _ = key.delete_value("PagePriority");
+        }
+    }
+    // If we created the PerfOptions key, remove it — but only if now empty
+    // (delete_subkey fails on a non-empty key, which is the safe behaviour).
+    if !existed {
+        if let Ok(exe_key) =
+            hklm.open_subkey_with_flags(format!("{}\\{}", IFEO_PATH, exe_name), KEY_ALL_ACCESS)
+        {
+            let _ = exe_key.delete_subkey("PerfOptions");
+        }
+    }
+
+    state.applied.remove(ID);
+    for k in ["exe-priority:path", "exe-priority:exe", "exe-priority:existed"] {
+        state.saved_strings.remove(k);
+    }
+    state.saved_dwords.remove("exe-priority:CpuPriorityClass");
+    TweakOpResult::ok(format!("Priority settings removed for {}", exe_name))
+}
+
+/// Public wrapper called from lib.rs — loads/saves state internally.
+pub fn apply_exe_priority_pub(exe_path: &str) -> TweakOpResult {
+    let mut state = load_state();
+    let result = apply_exe_priority_impl(&mut state, exe_path);
+    save_state(&state);
+    result
+}
+
+// ── Per-exe: Prefer High-Performance GPU (UserGpuPreferences) ─────────────────
+// Adapted from Fortnite-Optimizer's optimizeGPUPreference(). NOTE: the source
+// wrongly wrote to HKLM — this preference is a per-user setting and belongs in
+// HKCU (same place the Windows Settings > Graphics page writes it).
+
+const GPU_PREF_PATH: &str = "Software\\Microsoft\\DirectX\\UserGpuPreferences";
+
+fn apply_exe_gpu_pref_impl(state: &mut ExpState, exe_path: &str) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "prefer-high-perf-gpu-selected-exe";
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(GPU_PREF_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open UserGpuPreferences key", e.to_string()),
+    };
+
+    if let Some(saved) = state.saved_strings.get("exe-gpupref:path") {
+        if saved != exe_path {
+            return TweakOpResult::fail(
+                "A different executable already has saved GPU-preference state",
+                "Revert the current one before applying this tweak to another file",
+            );
+        }
+    }
+    let existing: String = key.get_value(exe_path).unwrap_or_default();
+    state
+        .saved_strings
+        .entry("exe-gpupref:path".into())
+        .or_insert(exe_path.to_string());
+    state
+        .saved_strings
+        .entry("exe-gpupref:original".into())
+        .or_insert(existing.clone());
+
+    match key.set_value(exe_path, &"GpuPreference=2;") {
+        Ok(_) => {
+            state.applied.insert(ID.into(), true);
+            let exe_name = std::path::Path::new(exe_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(exe_path);
+            TweakOpResult::ok(format!(
+                "{} set to prefer the high-performance GPU. Restart the game to take effect.",
+                exe_name
+            ))
+        }
+        Err(e) => TweakOpResult::fail("Failed to write GPU preference", e.to_string()),
+    }
+}
+
+fn revert_exe_gpu_pref_impl(state: &mut ExpState) -> TweakOpResult {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    const ID: &str = "prefer-high-perf-gpu-selected-exe";
+    let exe_path = match state.saved_strings.get("exe-gpupref:path").cloned() {
+        Some(p) => p,
+        None => {
+            state.applied.remove(ID);
+            return TweakOpResult::ok("No per-exe GPU preference to revert");
+        }
+    };
+    let original = state
+        .saved_strings
+        .get("exe-gpupref:original")
+        .cloned()
+        .unwrap_or_default();
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = match hkcu.create_subkey(GPU_PREF_PATH) {
+        Ok(k) => k,
+        Err(e) => return TweakOpResult::fail("Cannot open UserGpuPreferences key", e.to_string()),
+    };
+    let result = if original.is_empty() {
+        let _ = key.delete_value(&exe_path);
+        TweakOpResult::ok("GPU preference reset to Windows default (Let Windows decide)")
+    } else {
+        match key.set_value(&exe_path, &original) {
+            Ok(_) => TweakOpResult::ok("GPU preference restored to previous value"),
+            Err(e) => TweakOpResult::fail("Failed to restore GPU preference", e.to_string()),
+        }
+    };
+    if result.success {
+        state.applied.remove(ID);
+        state.saved_strings.remove("exe-gpupref:path");
+        state.saved_strings.remove("exe-gpupref:original");
+    }
+    result
+}
+
+/// Public wrapper called from lib.rs — loads/saves state internally.
+pub fn apply_exe_gpu_pref_pub(exe_path: &str) -> TweakOpResult {
+    let mut state = load_state();
+    let result = apply_exe_gpu_pref_impl(&mut state, exe_path);
+    save_state(&state);
+    result
+}
+
 // â”€â”€ NVIDIA detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub fn detect_nvidia_impl() -> bool {
@@ -2227,6 +3110,78 @@ pub fn detect_nvidia_impl() -> bool {
 }
 
 // â”€â”€ Status checking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// ── Real-state status checks (prefer actual system state over the stored map) ─
+
+/// disable-nagle is applied when any interface carries TcpAckFrequency = 1.
+fn check_nagle_applied() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let path = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces";
+    if let Ok(k) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(path) {
+        for sub in k.enum_keys().flatten() {
+            if let Ok(ik) = k.open_subkey(&sub) {
+                if ik
+                    .get_value::<u32, _>("TcpAckFrequency")
+                    .map(|v| v == 1)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// disable-nic-power-saving is applied when a physical NIC has PnPCapabilities = 24.
+fn check_nic_power_saving_applied() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    enumerate_net_adapter_keys().iter().any(|p| {
+        hklm.open_subkey(p)
+            .ok()
+            .and_then(|k| k.get_value::<u32, _>("PnPCapabilities").ok())
+            .map(|v| v == 24)
+            .unwrap_or(false)
+    })
+}
+
+/// Per-exe priority is applied when the stored exe's IFEO CpuPriorityClass = 3.
+fn check_exe_priority_applied() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let state = load_state();
+    let exe = match state.saved_strings.get("exe-priority:exe") {
+        Some(e) => e,
+        None => return false,
+    };
+    let perf = format!("{}\\{}\\PerfOptions", IFEO_PATH, exe);
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(perf)
+        .ok()
+        .and_then(|k| k.get_value::<u32, _>("CpuPriorityClass").ok())
+        .map(|v| v == 3)
+        .unwrap_or(false)
+}
+
+/// Per-exe GPU preference is applied when the stored exe's UserGpuPreferences = high-perf.
+fn check_exe_gpu_pref_applied() -> bool {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let state = load_state();
+    let path = match state.saved_strings.get("exe-gpupref:path") {
+        Some(p) => p,
+        None => return false,
+    };
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(GPU_PREF_PATH)
+        .ok()
+        .and_then(|k| k.get_value::<String, _>(path).ok())
+        .map(|v| v.contains("GpuPreference=2"))
+        .unwrap_or(false)
+}
 
 pub fn check_status_impl(tweak_id: &str) -> bool {
     // Load state only when needed (ultimate-performance uses saved GUID)
@@ -2421,9 +3376,33 @@ pub fn check_status_impl(tweak_id: &str) -> bool {
             })
         }
 
+        // Performance (v1.6.0) — kernel-in-RAM has a direct registry check
+        "keep-kernel-in-ram" => hklm_dword_eq(MEM_MGMT_PATH, "DisablePagingExecutive", 1),
+
+        // v1.7.0 — ToX adaptations with direct registry checks
+        "disable-mouse-accel" => hkcu_string_eq(MOUSE_PATH, "MouseSpeed", "0"),
+        "fast-keyboard-repeat" => hkcu_string_eq(KEYBOARD_PATH, "KeyboardDelay", "0"),
+        "foreground-boost" => {
+            hklm_dword_eq(PRIORITY_CONTROL_PATH, "Win32PrioritySeparation", 0x1A)
+        }
+        "disable-hibernate" => hklm_dword_eq(
+            "SYSTEM\\CurrentControlSet\\Control\\Power",
+            "HibernateEnabled",
+            0,
+        ),
+
+        // Real-state checks — read the actual system instead of the stored map,
+        // so these can't desync if the setting is changed outside VOptimizer.
+        "disable-nagle" => check_nagle_applied(),
+        "disable-nic-power-saving" => check_nic_power_saving_applied(),
+        "set-game-priority-selected-exe" => check_exe_priority_applied(),
+        "prefer-high-perf-gpu-selected-exe" => check_exe_gpu_pref_applied(),
+
         // Stored-state only (no simple registry check):
         // ram-standby-cleaner (one-shot), disable-nagle (multi-key),
-        // disable-fullscreen-optimizations-selected-exe (per-exe, stored in applied map)
+        // disable-core-parking (powercfg), and the per-exe tweaks
+        // (set-game-priority/prefer-high-perf-gpu/disable-fullscreen-opt-selected-exe)
+        // are all tracked via the applied map.
         _ => load_state().applied.get(tweak_id).copied().unwrap_or(false),
     }
 }
@@ -2491,7 +3470,21 @@ pub fn apply_impl(tweak_id: &str) -> TweakOpResult {
         "nvidia-msi-mode" => apply_nvidia_msi_mode(&mut state),
         // Interface (v1.2.0)
         "classic-alt-tab" => apply_alt_tab(&mut state),
-        // disable-fullscreen-optimizations-selected-exe applies via apply_exe_fsopt_pub (needs path arg)
+        // Performance / Gaming (v1.6.0 — Fortnite-Optimizer adaptations)
+        "disable-core-parking" => apply_core_parking(&mut state),
+        "keep-kernel-in-ram" => apply_keep_kernel_in_ram(&mut state),
+        // v1.7.0 — ToX adaptations
+        "disable-usb-selective-suspend" => apply_usb_suspend(&mut state),
+        "disable-hibernate" => apply_disable_hibernate(&mut state),
+        "disable-mouse-accel" => apply_mouse_accel(&mut state),
+        "fast-keyboard-repeat" => apply_fast_keyboard(&mut state),
+        "foreground-boost" => apply_foreground_boost(&mut state),
+        "disable-nic-power-saving" => apply_nic_power_saving(&mut state),
+        "disable-lso" => apply_disable_lso(&mut state),
+        // Per-exe tweaks apply via their own *_pub commands (they need a path arg):
+        //   disable-fullscreen-optimizations-selected-exe → apply_exe_fsopt_pub
+        //   set-game-priority-selected-exe                 → apply_exe_priority_pub
+        //   prefer-high-perf-gpu-selected-exe              → apply_exe_gpu_pref_pub
         _ => TweakOpResult::fail(
             format!("'{}' is a placeholder â€” not yet implemented", tweak_id),
             "placeholder",
@@ -2558,6 +3551,19 @@ pub fn revert_impl(tweak_id: &str) -> TweakOpResult {
         "classic-alt-tab" => revert_alt_tab(&mut state),
         // Gaming (v1.2.0)
         "disable-fullscreen-optimizations-selected-exe" => revert_exe_fsopt_impl(&mut state),
+        // Performance / Gaming (v1.6.0 — Fortnite-Optimizer adaptations)
+        "disable-core-parking" => revert_core_parking(&mut state),
+        "keep-kernel-in-ram" => revert_keep_kernel_in_ram(&mut state),
+        "set-game-priority-selected-exe" => revert_exe_priority_impl(&mut state),
+        "prefer-high-perf-gpu-selected-exe" => revert_exe_gpu_pref_impl(&mut state),
+        // v1.7.0 — ToX adaptations
+        "disable-usb-selective-suspend" => revert_usb_suspend(&mut state),
+        "disable-hibernate" => revert_disable_hibernate(&mut state),
+        "disable-mouse-accel" => revert_mouse_accel(&mut state),
+        "fast-keyboard-repeat" => revert_fast_keyboard(&mut state),
+        "foreground-boost" => revert_foreground_boost(&mut state),
+        "disable-nic-power-saving" => revert_nic_power_saving(&mut state),
+        "disable-lso" => revert_disable_lso(&mut state),
         _ => TweakOpResult::fail(
             format!("'{}' cannot be reverted â€” not yet implemented", tweak_id),
             "placeholder",

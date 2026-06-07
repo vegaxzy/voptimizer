@@ -9,7 +9,16 @@ use winreg::RegKey;
 // ── Registry paths ─────────────────────────────────────────────────────────
 
 const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+// 32-bit apps on 64-bit Windows register their HKLM autostart here.
+const RUN_WOW64_SUBKEY: &str =
+    r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run";
 const VOPT_DISABLED_ROOT: &str = r"Software\VOptimizer\DisabledStartup";
+// Where Windows / Task Manager record a Run entry's enabled/disabled state.
+// Byte 0 has its low bit clear (e.g. 02) when enabled, set (e.g. 03) when disabled.
+const STARTUP_APPROVED_RUN: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+const STARTUP_APPROVED_RUN32: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32";
 
 // ── Safety heuristics ──────────────────────────────────────────────────────
 
@@ -71,17 +80,45 @@ fn source_display(source: &str) -> &'static str {
     match source {
         "hkcu_run" => r"HKCU\Run",
         "hklm_run" => r"HKLM\Run",
+        "hklm_run_wow64" => r"HKLM\Run (32-bit)",
         "user_startup" => "User Startup",
         "common_startup" => "Common Startup",
         _ => "Unknown",
     }
 }
 
+/// For a registry startup source, returns (is_hkcu, run_subkey, approved_subkey).
+#[cfg(windows)]
+fn registry_source_paths(source: &str) -> Option<(bool, &'static str, &'static str)> {
+    match source {
+        "hkcu_run" => Some((true, RUN_SUBKEY, STARTUP_APPROVED_RUN)),
+        "hklm_run" => Some((false, RUN_SUBKEY, STARTUP_APPROVED_RUN)),
+        "hklm_run_wow64" => Some((false, RUN_WOW64_SUBKEY, STARTUP_APPROVED_RUN32)),
+        _ => None,
+    }
+}
+
+/// True when Windows/Task Manager has flagged this Run value as disabled in
+/// StartupApproved (byte 0's low bit is set, e.g. 03/07 vs 02/06 when enabled).
+#[cfg(windows)]
+fn is_approved_disabled(hive: &RegKey, approved_subkey: &str, value_name: &str) -> bool {
+    hive.open_subkey(approved_subkey)
+        .ok()
+        .and_then(|k| k.get_raw_value(value_name).ok())
+        .and_then(|raw| raw.bytes.first().copied())
+        .map(|b0| b0 & 1 == 1)
+        .unwrap_or(false)
+}
+
 // ── Listing helpers ────────────────────────────────────────────────────────
 
 #[cfg(windows)]
 fn list_registry_run(hive: &RegKey, source: &str) -> Vec<StartupApp> {
-    let key = match hive.open_subkey(RUN_SUBKEY) {
+    let (_, run_subkey, approved_subkey) = match registry_source_paths(source) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let key = match hive.open_subkey(run_subkey) {
         Ok(k) => k,
         Err(_) => return Vec::new(),
     };
@@ -98,13 +135,20 @@ fn list_registry_run(hive: &RegKey, source: &str) -> Vec<StartupApp> {
             let command: String = key.get_value(&name).ok()?;
             let disp = source_display(source).to_string();
             let sensitive = is_sensitive(&name, &command);
+            // Reflect Task Manager / Windows StartupApproved state so an entry
+            // disabled outside VOptimizer isn't shown as enabled.
+            let status = if is_approved_disabled(hive, approved_subkey, &name) {
+                "disabled"
+            } else {
+                "enabled"
+            };
             Some(StartupApp {
                 id: make_id(source, &name),
                 name,
                 command,
                 source: source.to_string(),
                 source_display: disp,
-                status: "enabled".to_string(),
+                status: status.to_string(),
                 is_sensitive: sensitive,
             })
         })
@@ -234,7 +278,18 @@ fn list_disabled_folder() -> Vec<StartupApp> {
 // ── Disable helpers ────────────────────────────────────────────────────────
 
 #[cfg(windows)]
-fn disable_registry_entry(is_hkcu: bool, source: &str, name: &str) -> StartupOpResult {
+fn disable_registry_entry(source: &str, name: &str) -> StartupOpResult {
+    let (is_hkcu, run_subkey, _approved) = match registry_source_paths(source) {
+        Some(v) => v,
+        None => {
+            return StartupOpResult {
+                success: false,
+                message: format!("Unknown source '{}'", source),
+                data: None,
+                error: Some("Unrecognised startup source".to_string()),
+            }
+        }
+    };
     let hive_predef = if is_hkcu {
         HKEY_CURRENT_USER
     } else {
@@ -243,7 +298,7 @@ fn disable_registry_entry(is_hkcu: bool, source: &str, name: &str) -> StartupOpR
 
     // 1. Read current command (read-only open is enough)
     let command: String = match RegKey::predef(hive_predef)
-        .open_subkey(RUN_SUBKEY)
+        .open_subkey(run_subkey)
         .and_then(|k| k.get_value(name))
     {
         Ok(v) => v,
@@ -280,7 +335,7 @@ fn disable_registry_entry(is_hkcu: bool, source: &str, name: &str) -> StartupOpR
 
     // 3. Delete from original Run key (requires write access)
     let delete_result = RegKey::predef(hive_predef)
-        .open_subkey_with_flags(RUN_SUBKEY, KEY_ALL_ACCESS)
+        .open_subkey_with_flags(run_subkey, KEY_ALL_ACCESS)
         .and_then(|k| k.delete_value(name));
 
     if let Err(e) = delete_result {
@@ -428,72 +483,121 @@ fn disable_folder_entry(source: &str, file_name: &str, is_user: bool) -> Startup
 
 // ── Enable helpers ─────────────────────────────────────────────────────────
 
+/// Clears the StartupApproved "disabled" flag (low bit of byte 0) so Windows
+/// treats the Run entry as enabled again — the same thing Task Manager does.
+#[cfg(windows)]
+fn clear_approved_flag(hive: &RegKey, approved_subkey: &str, name: &str) -> std::io::Result<()> {
+    let key = hive.open_subkey_with_flags(approved_subkey, KEY_ALL_ACCESS)?;
+    let mut raw = key.get_raw_value(name)?;
+    if let Some(b0) = raw.bytes.first_mut() {
+        *b0 &= !1u8;
+    }
+    key.set_raw_value(name, &raw)
+}
+
 #[cfg(windows)]
 fn enable_registry_entry(source: &str, name: &str) -> StartupOpResult {
-    let subkey = encode_subkey(source, name);
-    let storage_path = format!("{}\\{}", VOPT_DISABLED_ROOT, subkey);
-
-    // Read stored command
-    let command: String = match RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(&storage_path)
-        .and_then(|k| k.get_value("Command"))
-    {
-        Ok(v) => v,
-        Err(e) => {
+    let (is_hkcu, run_subkey, approved_subkey) = match registry_source_paths(source) {
+        Some(v) => v,
+        None => {
             return StartupOpResult {
                 success: false,
-                message: format!("Disabled entry '{}' not found", name),
+                message: format!("Unknown source '{}'", source),
                 data: None,
-                error: Some(e.to_string()),
+                error: Some("Unrecognised startup source".to_string()),
             }
         }
     };
-
-    // Restore to original Run key
-    let is_hkcu = source == "hkcu_run";
     let hive_predef = if is_hkcu {
         HKEY_CURRENT_USER
     } else {
         HKEY_LOCAL_MACHINE
     };
-    let restore_result = RegKey::predef(hive_predef)
-        .open_subkey_with_flags(RUN_SUBKEY, KEY_ALL_ACCESS)
-        .and_then(|k| k.set_value(name, &command));
+    let admin_hint = if !is_hkcu {
+        " (HKLM entries require administrator privileges)"
+    } else {
+        ""
+    };
+    let disp = source_display(source).to_string();
+    let subkey = encode_subkey(source, name);
+    let storage_path = format!("{}\\{}", VOPT_DISABLED_ROOT, subkey);
 
-    if let Err(e) = restore_result {
-        let hint = if !is_hkcu {
-            " (HKLM entries require administrator privileges)"
-        } else {
-            ""
-        };
+    // Case A — entry was disabled by VOptimizer (value moved to our storage).
+    if let Ok(command) = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(&storage_path)
+        .and_then(|k| k.get_value::<String, _>("Command"))
+    {
+        let restore = RegKey::predef(hive_predef)
+            .open_subkey_with_flags(run_subkey, KEY_ALL_ACCESS)
+            .and_then(|k| k.set_value(name, &command));
+        if let Err(e) = restore {
+            return StartupOpResult {
+                success: false,
+                message: format!("Could not restore to Run key{}", admin_hint),
+                data: None,
+                error: Some(e.to_string()),
+            };
+        }
+        let _ = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(VOPT_DISABLED_ROOT, KEY_ALL_ACCESS)
+            .and_then(|k| k.delete_subkey_all(&subkey));
+        let sensitive = is_sensitive(name, &command);
         return StartupOpResult {
-            success: false,
-            message: format!("Could not restore to Run key{}", hint),
-            data: None,
-            error: Some(e.to_string()),
+            success: true,
+            message: format!("'{}' enabled successfully", name),
+            data: Some(StartupApp {
+                id: make_id(source, name),
+                name: name.to_string(),
+                command,
+                source: source.to_string(),
+                source_display: disp,
+                status: "enabled".to_string(),
+                is_sensitive: sensitive,
+            }),
+            error: None,
         };
     }
 
-    // Remove from disabled storage
-    let _ = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey_with_flags(VOPT_DISABLED_ROOT, KEY_ALL_ACCESS)
-        .and_then(|k| k.delete_subkey_all(&subkey));
+    // Case B — entry is still in the Run key but flagged disabled in
+    // StartupApproved (e.g. disabled via Task Manager). Clear that flag.
+    let hive = RegKey::predef(hive_predef);
+    if is_approved_disabled(&hive, approved_subkey, name) {
+        let command: String = hive
+            .open_subkey(run_subkey)
+            .and_then(|k| k.get_value(name))
+            .unwrap_or_default();
+        return match clear_approved_flag(&hive, approved_subkey, name) {
+            Ok(_) => {
+                let sensitive = is_sensitive(name, &command);
+                StartupOpResult {
+                    success: true,
+                    message: format!("'{}' enabled successfully", name),
+                    data: Some(StartupApp {
+                        id: make_id(source, name),
+                        name: name.to_string(),
+                        command,
+                        source: source.to_string(),
+                        source_display: disp,
+                        status: "enabled".to_string(),
+                        is_sensitive: sensitive,
+                    }),
+                    error: None,
+                }
+            }
+            Err(e) => StartupOpResult {
+                success: false,
+                message: format!("Could not clear the disabled flag{}", admin_hint),
+                data: None,
+                error: Some(e.to_string()),
+            },
+        };
+    }
 
-    let disp = source_display(source).to_string();
-    let sensitive = is_sensitive(name, &command);
     StartupOpResult {
-        success: true,
-        message: format!("'{}' enabled successfully", name),
-        data: Some(StartupApp {
-            id: make_id(source, name),
-            name: name.to_string(),
-            command,
-            source: source.to_string(),
-            source_display: disp,
-            status: "enabled".to_string(),
-            is_sensitive: sensitive,
-        }),
-        error: None,
+        success: false,
+        message: format!("Disabled entry '{}' not found", name),
+        data: None,
+        error: Some("Not in VOptimizer storage or StartupApproved".to_string()),
     }
 }
 
@@ -580,6 +684,8 @@ pub fn list_impl() -> Vec<StartupApp> {
         let mut apps = Vec::new();
         apps.extend(list_registry_run(&hkcu, "hkcu_run"));
         apps.extend(list_registry_run(&hklm, "hklm_run"));
+        // 32-bit apps on 64-bit Windows register here — previously missed.
+        apps.extend(list_registry_run(&hklm, "hklm_run_wow64"));
 
         if let Some(p) = startup_folder_path(true) {
             apps.extend(list_folder_entries(&p, "user_startup"));
@@ -632,8 +738,7 @@ pub fn disable_impl(id: String) -> StartupOpResult {
 
     #[cfg(windows)]
     match source {
-        "hkcu_run" => disable_registry_entry(true, source, name),
-        "hklm_run" => disable_registry_entry(false, source, name),
+        "hkcu_run" | "hklm_run" | "hklm_run_wow64" => disable_registry_entry(source, name),
         "user_startup" => disable_folder_entry(source, name, true),
         "common_startup" => disable_folder_entry(source, name, false),
         _ => StartupOpResult {
@@ -670,7 +775,7 @@ pub fn enable_impl(id: String) -> StartupOpResult {
 
     #[cfg(windows)]
     match source {
-        "hkcu_run" | "hklm_run" => enable_registry_entry(source, name),
+        "hkcu_run" | "hklm_run" | "hklm_run_wow64" => enable_registry_entry(source, name),
         "user_startup" => enable_folder_entry(source, name, true),
         "common_startup" => enable_folder_entry(source, name, false),
         _ => StartupOpResult {

@@ -384,9 +384,167 @@ fn parse_ps_output(stdout: &[u8]) -> HashMap<String, String> {
     map
 }
 
-// ── Main entry point ──────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+//  LIVE METRICS — fast, accurate, locale-independent (Win32 FFI, no subprocess)
+//
+//  CPU usage is measured the way Task Manager does it: two GetSystemTimes samples
+//  and the busy/total delta — NOT Win32_Processor.LoadPercentage, which is a laggy
+//  WMI snapshot that does not match Task Manager.
+// ═════════════════════════════════════════════════════════════════════════════
 
-pub fn get_system_overview_impl() -> SystemOverview {
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct SystemLive {
+    pub cpu_pct: u32,
+    pub ram_used_mb: u64,
+    pub ram_total_mb: u64,
+    pub disk_used_gb: f64,
+    pub disk_total_gb: f64,
+    pub uptime_secs: u64,
+}
+
+#[cfg(windows)]
+mod winffi {
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    pub struct FILETIME {
+        pub low: u32,
+        pub high: u32,
+    }
+    impl FILETIME {
+        pub fn as_u64(&self) -> u64 {
+            ((self.high as u64) << 32) | self.low as u64
+        }
+    }
+
+    #[repr(C)]
+    pub struct MEMORYSTATUSEX {
+        pub length: u32,
+        pub memory_load: u32,
+        pub total_phys: u64,
+        pub avail_phys: u64,
+        pub total_pagefile: u64,
+        pub avail_pagefile: u64,
+        pub total_virtual: u64,
+        pub avail_virtual: u64,
+        pub avail_ext_virtual: u64,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn GetSystemTimes(
+            idle: *mut FILETIME,
+            kernel: *mut FILETIME,
+            user: *mut FILETIME,
+        ) -> i32;
+        pub fn GlobalMemoryStatusEx(buf: *mut MEMORYSTATUSEX) -> i32;
+        pub fn GetTickCount64() -> u64;
+        pub fn GetDiskFreeSpaceExW(
+            dir: *const u16,
+            free_avail: *mut u64,
+            total: *mut u64,
+            total_free: *mut u64,
+        ) -> i32;
+    }
+}
+
+#[cfg(windows)]
+fn read_system_times() -> Option<(u64, u64, u64)> {
+    use winffi::*;
+    let mut idle = FILETIME::default();
+    let mut kern = FILETIME::default();
+    let mut user = FILETIME::default();
+    // SAFETY: all three out-pointers are valid, initialised FILETIME structs.
+    let ok = unsafe { GetSystemTimes(&mut idle, &mut kern, &mut user) };
+    if ok == 0 {
+        return None;
+    }
+    Some((idle.as_u64(), kern.as_u64(), user.as_u64()))
+}
+
+/// CPU usage % over a short sampling window. `kernel` time already includes idle,
+/// so total = kernel + user and busy = total − idle.
+#[cfg(windows)]
+fn cpu_usage_percent() -> u32 {
+    let (i1, k1, u1) = match read_system_times() {
+        Some(v) => v,
+        None => return 0,
+    };
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    let (i2, k2, u2) = match read_system_times() {
+        Some(v) => v,
+        None => return 0,
+    };
+    let idle = i2.saturating_sub(i1);
+    let total = k2.saturating_sub(k1) + u2.saturating_sub(u1);
+    if total == 0 {
+        return 0;
+    }
+    let busy = total.saturating_sub(idle);
+    ((busy as f64 / total as f64) * 100.0).round().clamp(0.0, 100.0) as u32
+}
+
+#[cfg(windows)]
+fn mem_used_total_mb() -> (u64, u64) {
+    use winffi::*;
+    // SAFETY: zero-init then set the required `length` before the call.
+    let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    m.length = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    let ok = unsafe { GlobalMemoryStatusEx(&mut m) };
+    if ok == 0 {
+        return (0, 0);
+    }
+    const MB: u64 = 1024 * 1024;
+    let total = m.total_phys / MB;
+    let used = m.total_phys.saturating_sub(m.avail_phys) / MB;
+    (used, total)
+}
+
+#[cfg(windows)]
+fn uptime_secs_ffi() -> u64 {
+    // SAFETY: no arguments, returns a scalar.
+    unsafe { winffi::GetTickCount64() / 1000 }
+}
+
+#[cfg(windows)]
+fn disk_usage_gb(root: &str) -> (f64, f64) {
+    use winffi::*;
+    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut free_avail = 0u64;
+    let mut total = 0u64;
+    let mut total_free = 0u64;
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path; out-pointers are valid.
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_avail, &mut total, &mut total_free) };
+    if ok == 0 {
+        return (0.0, 0.0);
+    }
+    let gb = |b: u64| (b as f64 / 1024.0_f64.powi(3) * 10.0).round() / 10.0;
+    (gb(total.saturating_sub(total_free)), gb(total))
+}
+
+pub fn get_system_live_impl() -> SystemLive {
+    #[cfg(windows)]
+    {
+        let (ram_used_mb, ram_total_mb) = mem_used_total_mb();
+        let sys_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        let (disk_used_gb, disk_total_gb) = disk_usage_gb(&format!("{}\\", sys_drive));
+        SystemLive {
+            cpu_pct: cpu_usage_percent(),
+            ram_used_mb,
+            ram_total_mb,
+            disk_used_gb,
+            disk_total_gb,
+            uptime_secs: uptime_secs_ffi(),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        SystemLive::default()
+    }
+}
+
+// ── Static system info (slow WMI/registry — fetch once, cache aggressively) ───
+
+pub fn get_system_static_impl() -> SystemOverview {
     let mut r = SystemOverview::default();
 
     // ────────────────────────────────────────────────────────────────────────
@@ -468,16 +626,13 @@ pub fn get_system_overview_impl() -> SystemOverview {
 
     let script = r#"
 $ErrorActionPreference = 'SilentlyContinue'
-# CPU load, core/thread counts
-$cpu = Get-CimInstance Win32_Processor -Property NumberOfCores,NumberOfLogicalProcessors,LoadPercentage | Select-Object -First 1
+# CPU core/thread counts (static). Live CPU usage comes from GetSystemTimes FFI.
+$cpu = Get-CimInstance Win32_Processor -Property NumberOfCores,NumberOfLogicalProcessors | Select-Object -First 1
 Write-Output "CPU_CORES=$($cpu.NumberOfCores)"
 Write-Output "CPU_THREADS=$($cpu.NumberOfLogicalProcessors)"
-Write-Output "CPU_LOAD=$($cpu.LoadPercentage)"
-# OS memory and uptime
-$os = Get-CimInstance Win32_OperatingSystem -Property TotalVisibleMemorySize,FreePhysicalMemory,LastBootUpTime,InstallDate
+# OS — total RAM (for the hardware card) + install date. Live RAM usage / uptime come from FFI.
+$os = Get-CimInstance Win32_OperatingSystem -Property TotalVisibleMemorySize,InstallDate
 Write-Output "RAM_TOTAL_KB=$($os.TotalVisibleMemorySize)"
-Write-Output "RAM_FREE_KB=$($os.FreePhysicalMemory)"
-if ($os.LastBootUpTime) { Write-Output "UPTIME_SECS=$([math]::Round(((Get-Date)-$os.LastBootUpTime).TotalSeconds))" }
 if ($os.InstallDate)    { Write-Output "OS_INSTALL=$($os.InstallDate.ToString('yyyy-MM-dd'))" }
 Write-Output "LOCALE=$((Get-Culture).Name)"
 # RAM modules — type code + speed
@@ -552,21 +707,15 @@ if ($null -ne $diskNum) {
         let get_u64 = |k: &str| -> u64   { get(k).parse().unwrap_or(0) };
         let get_u32 = |k: &str| -> u32   { get(k).parse().unwrap_or(0) };
 
-        // ── CPU ──────────────────────────────────────────────────────────
+        // ── CPU (counts only — live usage comes from the live command) ────
         r.cpu_cores   = get_u32("CPU_CORES");
         r.cpu_threads = get_u32("CPU_THREADS");
-        r.cpu_pct     = get_u32("CPU_LOAD");
 
-        // ── RAM usage ────────────────────────────────────────────────────
+        // ── RAM (total for the hardware card; live usage from the live command)
         let total_kb = get_u64("RAM_TOTAL_KB");
-        let free_kb  = get_u64("RAM_FREE_KB");
         r.ram_total_mb = total_kb / 1024;
-        r.ram_used_mb  = total_kb.saturating_sub(free_kb) / 1024;
         r.ram_type      = ram_type_str(get_u32("RAM_TYPE_CODE")).to_string();
         r.ram_speed_mhz = get_u32("RAM_SPEED");
-
-        // ── Uptime ───────────────────────────────────────────────────────
-        r.uptime_secs = get_u64("UPTIME_SECS");
 
         // ── Install date override (WMI DateTime is more accurate than registry DWORD) ──
         let wmi_install = get("OS_INSTALL");
@@ -693,4 +842,23 @@ if ($null -ne $diskNum) {
     }
 
     r
+}
+
+/// Backward-compatible combined snapshot (static + live). Kept so the original
+/// `get_system_overview` command still works; the UI now prefers the split
+/// static/live commands so it can cache the slow part and poll the fast part.
+pub fn get_system_overview_impl() -> SystemOverview {
+    let mut s = get_system_static_impl();
+    let live = get_system_live_impl();
+    s.cpu_pct = live.cpu_pct;
+    s.ram_used_mb = live.ram_used_mb;
+    if live.ram_total_mb > 0 {
+        s.ram_total_mb = live.ram_total_mb;
+    }
+    s.disk_used_gb = live.disk_used_gb;
+    if live.disk_total_gb > 0.0 {
+        s.disk_total_gb = live.disk_total_gb;
+    }
+    s.uptime_secs = live.uptime_secs;
+    s
 }

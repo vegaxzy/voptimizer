@@ -18,6 +18,7 @@ import {
   Pickaxe,
 } from "lucide-react";
 import { AdminBanner } from "../components/AdminBanner";
+import { useCachedResource } from "../hooks/useCachedResource";
 import {
   detectOverlays,
   scanBackgroundLoad,
@@ -34,7 +35,6 @@ import {
 } from "../invoke/tools";
 import type {
   OverlayInfo,
-  ProcessLoad,
   ShaderCacheEntry,
   GameSessionStatus,
   MinecraftMonitor,
@@ -83,26 +83,14 @@ function fmtUptime(secs: number) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function OverlayDetectorCard() {
-  const [overlays, setOverlays] = useState<OverlayInfo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [scanned, setScanned] = useState(false);
-
-  const scan = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await detectOverlays();
-      setOverlays(data);
-      setScanned(true);
-    } catch (e) {
-      toast.error("Overlay scan failed", { description: String(e) });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    scan();
-  }, [scan]);
+  // Cached: first visit scans; later visits show the previous result instantly.
+  const { data, isLoading, isRefreshing, error, refresh } = useCachedResource(
+    "overlay-scan",
+    detectOverlays
+  );
+  const overlays = data ?? [];
+  const scanned = data !== null;
+  const loading = isLoading || isRefreshing;
 
   const detected = overlays.filter((o) => o.detected);
   const notDetected = overlays.filter((o) => !o.detected);
@@ -119,14 +107,20 @@ function OverlayDetectorCard() {
             </div>
           </div>
         </div>
-        <button className="tools-icon-btn" onClick={scan} disabled={loading} title="Refresh">
+        <button className="tools-icon-btn" onClick={refresh} disabled={loading} title="Rescan">
           <RefreshCw size={13} className={loading ? "spin" : ""} />
         </button>
       </div>
 
       <div className="tools-card-body">
-        {!scanned && !loading && (
+        {!scanned && isLoading && (
           <p className="tools-empty">Scanning overlays…</p>
+        )}
+
+        {error && scanned && (
+          <p className="tools-empty" style={{ color: "var(--warning)" }}>
+            Rescan failed — showing last result.
+          </p>
         )}
 
         {scanned && detected.length === 0 && (
@@ -203,27 +197,13 @@ function OverlayRow({ overlay }: { overlay: OverlayInfo }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function BackgroundLoadCard() {
-  const [processes, setProcesses] = useState<ProcessLoad[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [scanned, setScanned] = useState(false);
+  const { data, isLoading, isRefreshing, refresh } = useCachedResource(
+    "background-load-scan",
+    scanBackgroundLoad
+  );
   const [showAll, setShowAll] = useState(false);
-
-  const scan = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await scanBackgroundLoad();
-      setProcesses(data);
-      setScanned(true);
-    } catch (e) {
-      toast.error("Scan failed", { description: String(e) });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    scan();
-  }, [scan]);
+  const processes = data ?? [];
+  const loading = isLoading || isRefreshing;
 
   const impactful = processes.filter((p) => p.is_gaming_impact);
   const displayed = showAll ? processes : processes.slice(0, 10);
@@ -240,7 +220,7 @@ function BackgroundLoadCard() {
             </div>
           </div>
         </div>
-        <button className="tools-icon-btn" onClick={scan} disabled={loading} title="Refresh">
+        <button className="tools-icon-btn" onClick={refresh} disabled={loading} title="Rescan">
           <RefreshCw size={13} className={loading ? "spin" : ""} />
         </button>
       </div>
@@ -255,7 +235,7 @@ function BackgroundLoadCard() {
           </div>
         )}
 
-        {scanned && processes.length === 0 && (
+        {data !== null && processes.length === 0 && (
           <p className="tools-empty">No processes found.</p>
         )}
 
