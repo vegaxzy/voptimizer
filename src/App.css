@@ -1226,3 +1226,134 @@ input, select, textarea { font-family: inherit; }
 
 /* br-cat-badge--tools */
 .br-cat-badge--tools { background: var(--accent-dim); color: var(--accent); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SYSTEM OVERVIEW PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Header */
+.sov-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-bottom: 4px;
+}
+.sov-header-left  { display: flex; align-items: center; gap: 14px; }
+.sov-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.sov-header-icon  { font-size: 26px; line-height: 1; }
+
+.sov-health-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 12px; border-radius: 20px;
+  border: 1px solid; font-size: 12px; font-weight: 600;
+}
+.sov-health-score {
+  font-size: 13px; font-weight: 700; margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.sov-refresh-time {
+  font-size: 11px; color: var(--subtle); font-variant-numeric: tabular-nums;
+}
+
+/* Alerts */
+.sov-alerts { display: flex; flex-direction: column; gap: 6px; }
+.sov-alert {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 9px 14px; border-radius: var(--r-sm);
+  font-size: 12px; line-height: 1.5;
+}
+.sov-alert--warn { background: var(--warning-bg); color: var(--warning); }
+.sov-alert--danger { background: var(--danger-bg); color: var(--danger); }
+
+/* Metric cards — 4-up top row */
+.sov-metrics-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.sov-metric-card {
+  background: var(--card); border-radius: var(--r);
+  padding: 16px; display: flex; align-items: flex-start; gap: 12px;
+}
+.sov-metric-icon {
+  width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.sov-metric-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sov-metric-label   { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--subtle); }
+.sov-metric-primary { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.sov-metric-secondary { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Usage bar */
+.sov-bar-track {
+  height: 3px; border-radius: 4px; background: rgba(255,255,255,0.08);
+  overflow: hidden; margin-top: 6px;
+}
+.sov-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+
+/* Two-column layout for section cards */
+.sov-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* Section cards */
+.sov-section-card {
+  background: var(--card); border-radius: var(--r-lg); overflow: hidden;
+}
+.sov-section-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--sep);
+  background: rgba(255,255,255,0.02);
+  border-left: 3px solid;
+}
+.sov-section-icon  { display: flex; align-items: center; flex-shrink: 0; }
+.sov-section-title { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.sov-section-body  { padding: 6px 0; display: flex; flex-direction: column; }
+
+/* Info rows (key–value pairs) */
+.sov-info-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 6px 16px; border-bottom: 1px solid var(--sep-s);
+}
+.sov-info-row:last-child { border-bottom: none; }
+.sov-info-label {
+  font-size: 11px; color: var(--subtle); font-weight: 500; flex-shrink: 0; white-space: nowrap;
+}
+.sov-info-value {
+  font-size: 12px; color: var(--text); text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 64%;
+}
+.sov-info-value--mono { font-family: 'SF Mono','Consolas',monospace; font-size: 11px; color: var(--muted); }
+
+/* Driver rows */
+.sov-driver-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 16px; border-bottom: 1px solid var(--sep-s);
+  transition: background 0.08s;
+}
+.sov-driver-row:last-of-type { border-bottom: none; }
+.sov-driver-row:hover { background: var(--row-hover); }
+
+.sov-driver-info  { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sov-driver-name  { font-size: 12px; color: var(--text); font-weight: 500; }
+.sov-driver-note  { font-size: 10px; color: var(--warning); }
+.sov-driver-version {
+  font-size: 11px; font-family: 'SF Mono','Consolas',monospace;
+  font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+.sov-driver-badge {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 7px; border-radius: 20px;
+  font-size: 10px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+}
+.sov-driver-badge[data-status="ok"]      { background: var(--success-bg); color: var(--success); }
+.sov-driver-badge[data-status="outdated"]{ background: var(--warning-bg); color: var(--warning); }
+.sov-driver-badge[data-status="unknown"] { background: rgba(255,255,255,0.07); color: var(--subtle); }
+
+.sov-driver-note-footer {
+  font-size: 10px; color: var(--subtle); padding: 8px 16px 12px;
+  line-height: 1.5; font-style: italic;
+}
+
+/* BIOS status banners */
+.sov-bios-status {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin: 0 12px 10px; padding: 8px 12px;
+  border-radius: var(--r-sm); font-size: 11px; line-height: 1.5;
+}
+.sov-bios-status--ok   { background: var(--success-bg); color: var(--success); }
+.sov-bios-status--warn { background: var(--warning-bg); color: var(--warning); }

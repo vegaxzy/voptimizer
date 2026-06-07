@@ -6,15 +6,16 @@ import type { SidebarTool } from "./components/Sidebar";
 import { CategoryPage } from "./components/CategoryPage";
 import { StartupAppsPage } from "./pages/StartupAppsPage";
 import { BackupRestorePage } from "./pages/BackupRestorePage";
-import { MinecraftPage } from "./pages/MinecraftPage";
+import { SystemOverviewPage } from "./pages/SystemOverviewPage";
 import { ToolsPage } from "./pages/ToolsPage";
 import { useTweaks } from "./hooks/useTweaks";
 import { useAppStore } from "./store/useAppStore";
 
 const TOOLS: SidebarTool[] = [
-  { id: "startup-apps",   name: "Startup Apps",    icon: "🚀" },
-  { id: "backup-restore", name: "Backup & Restore", icon: "🛡️" },
-  { id: "gaming-tools",   name: "Gaming Tools",     icon: "🔧" },
+  { id: "system-overview", name: "System Overview",  icon: "🖥️" },
+  { id: "startup-apps",    name: "Startup Apps",     icon: "🚀" },
+  { id: "backup-restore",  name: "Backup & Restore", icon: "🛡️" },
+  { id: "gaming-tools",    name: "Gaming Tools",     icon: "🔧" },
 ];
 
 const TOOL_IDS = new Set(TOOLS.map((t) => t.id));
@@ -43,14 +44,11 @@ function App() {
     cancelApply,
     revert,
     clearLogs,
-    applyPreset,
     restartAsAdmin,
   } = useTweaks();
 
   const isTool = TOOL_IDS.has(activePage);
-  const isMinecraft = activePage === "minecraft";
-  const isGamingTools = activePage === "gaming-tools";
-  const activeCategory = (isTool || isMinecraft) ? null : CATEGORIES.find((c) => c.id === activePage) ?? null;
+  const activeCategory = isTool ? null : CATEGORIES.find((c) => c.id === activePage) ?? null;
 
   const tweakCounts = useMemo(
     () =>
@@ -88,26 +86,14 @@ function App() {
       />
 
       <div className="main-area">
-        {activePage === "startup-apps" ? (
+        {activePage === "system-overview" ? (
+          <SystemOverviewPage />
+        ) : activePage === "startup-apps" ? (
           <StartupAppsPage isAdmin={isAdmin} onRestartAsAdmin={restartAsAdmin} />
         ) : activePage === "backup-restore" ? (
           <BackupRestorePage isAdmin={isAdmin} onRestartAsAdmin={restartAsAdmin} />
-        ) : isGamingTools ? (
+        ) : activePage === "gaming-tools" ? (
           <ToolsPage isAdmin={isAdmin} onRestartAsAdmin={restartAsAdmin} />
-        ) : activePage === "minecraft" ? (
-          <MinecraftPage
-            tweakStates={tweakStates}
-            hasNvidia={hasNvidia}
-            hasAmd={hasAmd}
-            isAdmin={isAdmin}
-            onRequestApply={requestApply}
-            onRevert={revert}
-            onConfirmApply={confirmApply}
-            onCancelApply={cancelApply}
-            pendingApplyId={pendingApplyId}
-            applyPreset={applyPreset}
-            onRestartAsAdmin={restartAsAdmin}
-          />
         ) : activeCategory ? (
           <CategoryPage
             category={activeCategory}

@@ -1,8 +1,8 @@
 import {
   Rocket,
   Archive,
-  Gamepad2,
   Wrench,
+  Monitor,
   ShieldCheck,
   ShieldAlert,
   Settings,
@@ -18,9 +18,10 @@ export interface SidebarTool {
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
-  "startup-apps":   <Rocket  size={13} strokeWidth={1.8} />,
-  "backup-restore": <Archive size={13} strokeWidth={1.8} />,
-  "gaming-tools":   <Wrench  size={13} strokeWidth={1.8} />,
+  "system-overview": <Monitor size={13} strokeWidth={1.8} />,
+  "startup-apps":    <Rocket  size={13} strokeWidth={1.8} />,
+  "backup-restore":  <Archive size={13} strokeWidth={1.8} />,
+  "gaming-tools":    <Wrench  size={13} strokeWidth={1.8} />,
 };
 
 interface SidebarProps {
@@ -96,19 +97,6 @@ export function Sidebar({
             <span className="sidebar-item-name">{tool.name}</span>
           </button>
         ))}
-
-        <p className="sidebar-section-label" style={{ marginTop: "16px" }}>
-          MINECRAFT
-        </p>
-        <button
-          className={cn("sidebar-item", activePage === "minecraft" && "sidebar-item--active")}
-          onClick={() => onSelectPage("minecraft")}
-        >
-          <span className="sidebar-item-icon">
-            <Gamepad2 size={13} strokeWidth={1.8} />
-          </span>
-          <span className="sidebar-item-name">Minecraft</span>
-        </button>
 
         <p className="sidebar-section-label" style={{ marginTop: "16px" }}>
           TWEAKS

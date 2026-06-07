@@ -4,6 +4,7 @@ mod admin;
 mod backup;
 mod minecraft;
 mod startup;
+mod system_info;
 mod tools;
 mod tweaks_impl;
 mod util;
@@ -15,6 +16,7 @@ use tools::{
     BenchmarkComparison, BenchmarkStateResult, CleanResult, GameSessionStatus, MinecraftMonitor,
     OverlayInfo, ProcessLoad, ShaderCacheEntry, SystemSnapshot,
 };
+use system_info::SystemOverview;
 use tweaks_impl::TweakOpResult;
 
 // ── Tweak commands ─────────────────────────────────────────────────────────
@@ -413,6 +415,13 @@ async fn clear_benchmark() -> Result<(), String> {
     Ok(())
 }
 
+// ── System overview ────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_system_overview() -> Result<SystemOverview, String> {
+    Ok(system_info::get_system_overview_impl())
+}
+
 // ── App entry ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -420,6 +429,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            // System Overview
+            get_system_overview,
             // Admin
             is_running_as_admin,
             restart_as_admin,
