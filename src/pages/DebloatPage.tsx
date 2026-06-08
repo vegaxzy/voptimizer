@@ -133,6 +133,7 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
         new Set(
           result
             .filter((c) => c.default_selected && c.exists && c.size_mb > 0)
+            .filter((c) => !c.requires_admin || isAdmin)
             .map((c) => c.id)
         )
       );
@@ -141,7 +142,7 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     scan();
@@ -205,8 +206,8 @@ function TempCleanerView({ isAdmin }: { isAdmin: boolean }) {
             <button
               key={c.id}
               className={cn("dbl-row", isSel && "dbl-row--selected", empty && "dbl-row--empty")}
-              onClick={() => !empty && toggle(c.id)}
-              disabled={empty || cleaning}
+              onClick={() => !empty && !adminBlocked && toggle(c.id)}
+              disabled={empty || adminBlocked || cleaning}
             >
               <span className={cn("vc-check", isSel && "vc-check--on")} aria-hidden="true">
                 <Check size={13} strokeWidth={3} />

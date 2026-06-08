@@ -7,7 +7,7 @@
 
 use crate::util::no_window_cmd;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
@@ -224,21 +224,38 @@ fn matching_files_stats(dir: &Path, prefixes: &[&str]) -> (u64, u64) {
     (bytes, count)
 }
 
-fn fixed_drives() -> Vec<char> {
-    ('A'..='Z')
-        .filter(|d| Path::new(&format!("{}:\\", d)).exists())
-        .collect()
-}
-
 fn recycle_bin_stats() -> (u64, u64) {
-    let mut bytes = 0u64;
-    let mut count = 0u64;
-    for d in fixed_drives() {
-        let p = PathBuf::from(format!("{}:\\$Recycle.Bin", d));
-        if p.exists() {
-            let (b, c) = dir_stats(&p);
-            bytes += b;
-            count += c;
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$shell = New-Object -ComObject Shell.Application
+$bin = $shell.NameSpace(0xA)
+$bytes = [int64]0
+$count = [int64]0
+if ($bin) {
+  foreach ($item in $bin.Items()) {
+    $count += 1
+    try { $bytes += [int64]$item.Size } catch {}
+  }
+}
+Write-Output "BYTES=$bytes"
+Write-Output "COUNT=$count"
+"#;
+
+    let out = no_window_cmd(ps_exe())
+        .args(["-NonInteractive", "-NoProfile", "-Command", script])
+        .output();
+
+    let Ok(output) = out else {
+        return (0, 0);
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut bytes = 0;
+    let mut count = 0;
+    for line in text.lines() {
+        if let Some(v) = line.trim().strip_prefix("BYTES=") {
+            bytes = v.parse().unwrap_or(0);
+        } else if let Some(v) = line.trim().strip_prefix("COUNT=") {
+            count = v.parse().unwrap_or(0);
         }
     }
     (bytes, count)
