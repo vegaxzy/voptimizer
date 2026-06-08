@@ -1,13 +1,16 @@
 {
   "name": "v-optimizer",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "set CARGO_TARGET_DIR=%CD%\\.cargo-target&& tauri"
+    "tauri": "set CARGO_TARGET_DIR=%CD%\\.cargo-target&& tauri",
+    "tauri:dev": "set CARGO_TARGET_DIR=%CD%\\.cargo-target&& tauri dev",
+    "tauri:build": "set CARGO_TARGET_DIR=%TEMP%\\voptimizer-cargo-target&& tauri build",
+    "tauri:exe": "set CARGO_TARGET_DIR=%TEMP%\\voptimizer-cargo-target&& tauri build --no-bundle"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
